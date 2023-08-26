@@ -16,8 +16,8 @@ package raft
 
 import (
 	"errors"
-
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+	"sync"
 )
 
 // None is a placeholder node ID used when there is no leader.
@@ -113,6 +113,9 @@ type Raft struct {
 	Term uint64
 	Vote uint64
 
+	peers []uint64
+	mu    *sync.Mutex
+
 	// the log
 	RaftLog *RaftLog
 
@@ -165,50 +168,117 @@ func newRaft(c *Config) *Raft {
 		panic(err.Error())
 	}
 	// Your Code Here (2A).
-	return nil
+	raft := &Raft{
+		id:               c.ID,
+		heartbeatTimeout: c.HeartbeatTick,
+		electionTimeout:  c.ElectionTick,
+		State:            StateFollower,
+		peers:            c.peers,
+		mu:               new(sync.Mutex),
+		electionElapsed:  0,
+		heartbeatElapsed: 0,
+	}
+	return raft
 }
 
 // sendAppend sends an append RPC with new entries (if any) and the
 // current commit index to the given peer. Returns true if a message was sent.
 func (r *Raft) sendAppend(to uint64) bool {
 	// Your Code Here (2A).
+
 	return false
 }
 
 // sendHeartbeat sends a heartbeat RPC to the given peer.
 func (r *Raft) sendHeartbeat(to uint64) {
 	// Your Code Here (2A).
+	msg := pb.Message{
+		To:   to,
+		From: r.id,
+		Term: r.Term,
+	}
+
+	if r.State == StateCandidate {
+		msg.MsgType = pb.MessageType_MsgRequestVote
+	}
+	if r.State == StateLeader {
+		msg.MsgType = pb.MessageType_MsgBeat
+	}
+
+	//发送消息，只需将其推送到 raft.Raft.msgs
+	r.msgs = append(r.msgs, msg)
 }
 
 // tick advances the internal logical clock by a single tick.
+// 时钟周期使内部逻辑时钟提前一个时钟周期。
 func (r *Raft) tick() {
 	// Your Code Here (2A).
+	for {
+		switch r.State {
+		//维护electionElapsed
+		case StateFollower:
+			r.electionElapsed++
+			if timeout {
+				msg := pb.Message{MsgType: pb.MessageType_MsgHup}
+				r.msgs = append(r.msgs, msg)
+				r.becomeCandidate()
+			}
+
+		//维护electionElapsed
+		case StateCandidate:
+
+		//维护heartElapsed
+		case StateLeader:
+
+		}
+	}
+
 }
 
 // becomeFollower transform this peer's state to Follower
 func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	// Your Code Here (2A).
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.State = StateFollower
+	r.Term = term
+	r.Lead = lead
+
 }
 
 // becomeCandidate transform this peer's state to candidate
 func (r *Raft) becomeCandidate() {
 	// Your Code Here (2A).
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.State = StateCandidate
+	r.Term += 1
 }
 
 // becomeLeader transform this peer's state to leader
 func (r *Raft) becomeLeader() {
 	// Your Code Here (2A).
 	// NOTE: Leader should propose a noop entry on its term
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.State = StateLeader
 }
 
 // Step the entrance of handle message, see `MessageType`
 // on `eraftpb.proto` for what msgs should be handled
+// Raft 收到的所有消息将被传递到 raft.Raft.Step()
 func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
 	switch r.State {
 	case StateFollower:
+
 	case StateCandidate:
+
 	case StateLeader:
+
 	}
 	return nil
 }
@@ -216,11 +286,18 @@ func (r *Raft) Step(m pb.Message) error {
 // handleAppendEntries handle AppendEntries RPC request
 func (r *Raft) handleAppendEntries(m pb.Message) {
 	// Your Code Here (2A).
+
 }
 
 // handleHeartbeat handle Heartbeat RPC request
 func (r *Raft) handleHeartbeat(m pb.Message) {
 	// Your Code Here (2A).
+	switch m.MsgType {
+	case pb.MessageType_MsgRequestVote:
+
+	case pb.MessageType_MsgBeat:
+
+	}
 }
 
 // handleSnapshot handle Snapshot RPC request
