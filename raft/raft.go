@@ -113,8 +113,7 @@ type Raft struct {
 	Term uint64
 	Vote uint64
 
-	peers []uint64
-	mu    *sync.Mutex
+	mu *sync.Mutex
 
 	// the log
 	RaftLog *RaftLog
@@ -173,7 +172,6 @@ func newRaft(c *Config) *Raft {
 		heartbeatTimeout: c.HeartbeatTick,
 		electionTimeout:  c.ElectionTick,
 		State:            StateFollower,
-		peers:            c.peers,
 		mu:               new(sync.Mutex),
 		electionElapsed:  0,
 		heartbeatElapsed: 0,
@@ -218,7 +216,7 @@ func (r *Raft) tick() {
 		//维护electionElapsed
 		case StateFollower:
 			r.electionElapsed++
-			if timeout {
+			if true {
 				msg := pb.Message{MsgType: pb.MessageType_MsgHup}
 				r.msgs = append(r.msgs, msg)
 				r.becomeCandidate()
