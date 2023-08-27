@@ -17,6 +17,7 @@ package raft
 import (
 	"errors"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+	"math/rand"
 	"sync"
 )
 
@@ -176,11 +177,15 @@ func newRaft(c *Config) *Raft {
 		electionElapsed:  0,
 		heartbeatElapsed: 0,
 	}
+
+	go raft.tick()
+
 	return raft
 }
 
 // sendAppend sends an append RPC with new entries (if any) and the
 // current commit index to the given peer. Returns true if a message was sent.
+// sendAppend发送一个携带新的日志的RPC和目前已经提交的日志索引给发送的peer，返回为真如果消息发送了
 func (r *Raft) sendAppend(to uint64) bool {
 	// Your Code Here (2A).
 
@@ -188,6 +193,7 @@ func (r *Raft) sendAppend(to uint64) bool {
 }
 
 // sendHeartbeat sends a heartbeat RPC to the given peer.
+// sendHeartbeat发送一个心跳RPC给发送的peer
 func (r *Raft) sendHeartbeat(to uint64) {
 	// Your Code Here (2A).
 	msg := pb.Message{
@@ -196,6 +202,7 @@ func (r *Raft) sendHeartbeat(to uint64) {
 		Term: r.Term,
 	}
 
+	//根据角色的不同设置msg的type
 	if r.State == StateCandidate {
 		msg.MsgType = pb.MessageType_MsgRequestVote
 	}
@@ -208,26 +215,38 @@ func (r *Raft) sendHeartbeat(to uint64) {
 }
 
 // tick advances the internal logical clock by a single tick.
-// 时钟周期使内部逻辑时钟提前一个时钟周期。
+// 时钟周期使内部逻辑时钟提前一个时钟周期,用的都是逻辑时钟
 func (r *Raft) tick() {
+	random := rand.Intn(5) + 5
 	// Your Code Here (2A).
 	for {
 		switch r.State {
 		//维护electionElapsed
 		case StateFollower:
 			r.electionElapsed++
-			if true {
+			if r.electionElapsed > r.electionTimeout+random {
 				msg := pb.Message{MsgType: pb.MessageType_MsgHup}
+				//将msg发送到本地的msgs,msgHup表示start a new election.
 				r.msgs = append(r.msgs, msg)
 				r.becomeCandidate()
+				r.electionElapsed = 0
 			}
 
-		//维护electionElapsed
 		case StateCandidate:
-
+			////控制选举时间，如果在规定时间内都没有完成选举，退回为follower
+			//r.electionElapsed++
+			//声明消息的类型
+			msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, Term: r.Term}
+			r.msgs = append(r.msgs, msg)
 		//维护heartElapsed
 		case StateLeader:
-
+			r.heartbeatElapsed++
+			//当heartbeatElapsed超过heartbeatTimeout，发送心跳
+			if r.heartbeatElapsed > r.heartbeatTimeout {
+				msg := pb.Message{MsgType: pb.MessageType_MsgBeat}
+				r.msgs = append(r.msgs, msg)
+				r.electionElapsed = 0
+			}
 		}
 	}
 
@@ -263,6 +282,7 @@ func (r *Raft) becomeLeader() {
 	defer r.mu.Unlock()
 
 	r.State = StateLeader
+	r.Term += 1
 }
 
 // Step the entrance of handle message, see `MessageType`
@@ -272,29 +292,64 @@ func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
 	switch r.State {
 	case StateFollower:
-
+		//处理来自candidate和leader的请求
+		r.handleHeartbeat(m)
 	case StateCandidate:
+		//发起投票
+		if m.MsgType == pb.MessageType_MsgHup {
+			r.sendHeartbeat(m.To)
+		}
 
+		if m.MsgType == pb.MessageType_MsgRequestVote {
+			r.sendHeartbeat(m.To)
+		}
+
+		//收到响应
+		if m.MsgType == pb.MessageType_MsgRequestVoteResponse {
+			//todo
+		}
 	case StateLeader:
-
+		//发送心跳
+		if m.MsgType == pb.MessageType_MsgHeartbeat {
+			r.sendHeartbeat(m.To)
+		}
 	}
 	return nil
 }
 
 // handleAppendEntries handle AppendEntries RPC request
+// handleAppendEntries处理添加日志的RPC请求
 func (r *Raft) handleAppendEntries(m pb.Message) {
 	// Your Code Here (2A).
 
 }
 
 // handleHeartbeat handle Heartbeat RPC request
+// handleHeartbeat处理心跳的RPC请求
 func (r *Raft) handleHeartbeat(m pb.Message) {
 	// Your Code Here (2A).
 	switch m.MsgType {
+	case pb.MessageType_MsgHup:
+		r.becomeCandidate()
 	case pb.MessageType_MsgRequestVote:
+		if m.Term > r.Term {
+			r.becomeFollower(m.Term, m.From)
+			r.Term = m.Term
+			r.Vote = m.From
+			r.Lead = m.From
+			r.electionElapsed = 0
 
+			//返回响应
+			msg := pb.Message{MsgType: pb.MessageType_MsgRequestVoteResponse, From: r.id, To: m.From}
+			r.msgs = append(r.msgs, msg)
+		}
 	case pb.MessageType_MsgBeat:
-
+		if m.Term >= r.Term {
+			r.becomeFollower(m.Term, m.From)
+			r.Term = m.Term
+			r.Lead = m.From
+			r.heartbeatElapsed = 0
+		}
 	}
 }
 
