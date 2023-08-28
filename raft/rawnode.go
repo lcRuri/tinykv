@@ -36,15 +36,20 @@ type SoftState struct {
 // Ready encapsulates the entries and messages that are ready to read,
 // be saved to stable storage, committed or sent to other peers.
 // All fields in Ready are read-only.
+// Ready封装了需要发送的entries和messages，被保存到稳定的存储，提交或者发送给peers，所有的filed在Ready中是仅读的
 type Ready struct {
 	// The current volatile state of a Node.
 	// SoftState will be nil if there is no update.
 	// It is not required to consume or store SoftState.
+	// 节点的当前易失状态，SoftState将会是nil如果没有更新，它不需要使用或存储
 	*SoftState
 
 	// The current state of a Node to be saved to stable storage BEFORE
 	// Messages are sent.
 	// HardState will be equal to empty state if there is no update.
+	// 要保存到稳定存储之前的节点的当前状态
+	// 发送消息。
+	// 如果没有更新，hardState将等于空状态
 	pb.HardState
 
 	// Entries specifies entries to be saved to stable storage BEFORE
@@ -67,15 +72,18 @@ type Ready struct {
 }
 
 // RawNode is a wrapper of Raft.
+// RawNode是Raft的封装
 type RawNode struct {
 	Raft *Raft
 	// Your Data Here (2A).
 }
 
 // NewRawNode returns a new RawNode given configuration and a list of raft peers.
+// NewRawNode返回一个新的RawNode给定配置和raft peers列表
 func NewRawNode(config *Config) (*RawNode, error) {
 	// Your Code Here (2A).
-	return nil, nil
+	raft := newRaft(config)
+	return &RawNode{Raft: raft}, nil
 }
 
 // Tick advances the internal logical clock by a single tick.

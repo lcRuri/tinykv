@@ -1581,6 +1581,7 @@ type network struct {
 
 	// msgHook is called for each message sent. It may inspect the
 	// message and return true to send it or false to drop it.
+	// 消息钩子被调用给每个发送的msg，它可能会坚持消息并且返回true来发送或者返回false来删除
 	msgHook func(pb.Message) bool
 }
 
@@ -1630,11 +1631,14 @@ func newNetworkWithConfig(configFunc func(*Config), peers ...stateMachine) *netw
 }
 
 func (nw *network) send(msgs ...pb.Message) {
+	//只要peer里面有了消息，就进行推送
 	for len(msgs) > 0 {
 		m := msgs[0]
 		p := nw.peers[m.To]
 		//todo 完成msg的发送
 		p.Step(m)
+		//处理完的消息丢弃
+		//时间过短的话，节点自己会给自己推送一堆hub消息
 		msgs = append(msgs[1:], nw.filter(p.readMessages())...)
 	}
 }
