@@ -19,6 +19,7 @@ import (
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"math/rand"
 	"sync"
+	"time"
 )
 
 // None is a placeholder node ID used when there is no leader.
@@ -199,6 +200,7 @@ func (r *Raft) sendAppend(to uint64) bool {
 // sendHeartbeat发送一个心跳RPC给发送的peer
 func (r *Raft) sendHeartbeat(to uint64) {
 	// Your Code Here (2A).
+
 	msg := pb.Message{
 		To:   to,
 		From: r.id,
@@ -208,6 +210,7 @@ func (r *Raft) sendHeartbeat(to uint64) {
 	//根据角色的不同设置msg的type
 	if r.State == StateCandidate {
 		msg.MsgType = pb.MessageType_MsgRequestVote
+
 	}
 	if r.State == StateLeader {
 		msg.MsgType = pb.MessageType_MsgBeat
@@ -220,27 +223,33 @@ func (r *Raft) sendHeartbeat(to uint64) {
 // tick advances the internal logical clock by a single tick.
 // 时钟周期使内部逻辑时钟提前一个时钟周期,用的都是逻辑时钟
 func (r *Raft) tick() {
-	random := rand.Intn(5) + 5
+	if len(r.peers) == 1 {
+		r.becomeLeader()
+	}
+	random := rand.Intn(1000) + 50
 	// Your Code Here (2A).
 	for {
+
 		switch r.State {
 		//维护electionElapsed
 		case StateFollower:
 			r.electionElapsed++
-			if r.electionElapsed > r.electionTimeout+random {
+			if r.electionElapsed > r.electionTimeout+random+10000 {
 				msg := pb.Message{MsgType: pb.MessageType_MsgHup}
 				//将msg发送到本地的msgs,msgHup表示start a new election.
 				r.msgs = append(r.msgs, msg)
 				r.becomeCandidate()
 				r.electionElapsed = 0
 			}
-
 		case StateCandidate:
-			////控制选举时间，如果在规定时间内都没有完成选举，退回为follower
-			//r.electionElapsed++
-			//声明消息的类型
-			msg := pb.Message{MsgType: pb.MessageType_MsgRequestVote, From: r.id, Term: r.Term}
-			r.msgs = append(r.msgs, msg)
+			//todo 如何控制产生消息的时间
+			if r.electionElapsed <= r.electionTimeout+random && r.State == StateCandidate {
+				//推送hub消息给自己，表示开启一轮新的选举
+				msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, To: r.id}
+				r.msgs = append(r.msgs, msg)
+				time.Sleep(time.Duration(r.electionTimeout+random+10000) * time.Millisecond)
+			}
+
 		//维护heartElapsed
 		case StateLeader:
 			r.heartbeatElapsed++
@@ -275,6 +284,8 @@ func (r *Raft) becomeCandidate() {
 
 	r.State = StateCandidate
 	r.Term += 1
+	//给自己投票
+	r.votes[r.id] = true
 }
 
 // becomeLeader transform this peer's state to leader
@@ -284,23 +295,41 @@ func (r *Raft) becomeLeader() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	//变更状态
 	r.State = StateLeader
-	r.Term += 1
+
+	//todo 重新初始化Match, Next uint64
+
 }
 
 // Step the entrance of handle message, see `MessageType`
 // on `eraftpb.proto` for what msgs should be handled
 // Raft 收到的所有消息将被传递到 raft.Raft.Step()
+// 查看eraftpb.proto来确定什么消息应该被处理
 func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
 	switch r.State {
 	case StateFollower:
 		//处理来自candidate和leader的请求
-		r.handleHeartbeat(m)
+		if m.MsgType == pb.MessageType_MsgHup {
+			r.becomeCandidate()
+		}
+
+		if m.MsgType == pb.MessageType_MsgBeat || m.MsgType == pb.MessageType_MsgRequestVote {
+			r.handleHeartbeat(m)
+		}
+
 	case StateCandidate:
 		//发起投票
 		if m.MsgType == pb.MessageType_MsgHup {
-			r.sendHeartbeat(m.To)
+			for _, peer := range r.peers {
+				if peer == r.id {
+					continue
+				} else {
+					r.sendHeartbeat(m.To)
+				}
+			}
+
 		}
 
 		if m.MsgType == pb.MessageType_MsgRequestVote {
@@ -311,6 +340,9 @@ func (r *Raft) Step(m pb.Message) error {
 		if m.MsgType == pb.MessageType_MsgRequestVoteResponse {
 			//todo
 			r.votes[m.From] = true
+			if len(r.votes) > len(r.peers)/2 {
+				r.becomeLeader()
+			}
 		}
 	case StateLeader:
 		//发送心跳
