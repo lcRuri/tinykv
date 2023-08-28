@@ -114,7 +114,8 @@ type Raft struct {
 	Term uint64
 	Vote uint64
 
-	mu *sync.Mutex
+	mu    *sync.Mutex
+	peers []uint64
 
 	// the log
 	RaftLog *RaftLog
@@ -176,6 +177,8 @@ func newRaft(c *Config) *Raft {
 		mu:               new(sync.Mutex),
 		electionElapsed:  0,
 		heartbeatElapsed: 0,
+		peers:            c.peers,
+		votes:            map[uint64]bool{},
 	}
 
 	go raft.tick()
@@ -236,7 +239,7 @@ func (r *Raft) tick() {
 			////控制选举时间，如果在规定时间内都没有完成选举，退回为follower
 			//r.electionElapsed++
 			//声明消息的类型
-			msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, Term: r.Term}
+			msg := pb.Message{MsgType: pb.MessageType_MsgRequestVote, From: r.id, Term: r.Term}
 			r.msgs = append(r.msgs, msg)
 		//维护heartElapsed
 		case StateLeader:
@@ -307,6 +310,7 @@ func (r *Raft) Step(m pb.Message) error {
 		//收到响应
 		if m.MsgType == pb.MessageType_MsgRequestVoteResponse {
 			//todo
+			r.votes[m.From] = true
 		}
 	case StateLeader:
 		//发送心跳
