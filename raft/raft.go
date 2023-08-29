@@ -181,7 +181,7 @@ func newRaft(c *Config) *Raft {
 		votes:            map[uint64]bool{},
 	}
 
-	go raft.tick()
+	//go raft.tick()
 
 	return raft
 }
@@ -212,7 +212,7 @@ func (r *Raft) sendHeartbeat(to uint64) {
 
 	}
 	if r.State == StateLeader {
-		msg.MsgType = pb.MessageType_MsgBeat
+		msg.MsgType = pb.MessageType_MsgHeartbeat
 	}
 
 	//发送消息，只需将其推送到 raft.Raft.msgs
@@ -220,7 +220,7 @@ func (r *Raft) sendHeartbeat(to uint64) {
 }
 
 // tick advances the internal logical clock by a single tick.
-// 时钟周期使内部逻辑时钟提前一个时钟周期,用的都是逻辑时钟
+// 时钟周期使内部逻辑时钟提前一个时钟周期,用的都是逻辑时钟。tick是否要作为协程启动
 func (r *Raft) tick() {
 	if len(r.peers) == 1 {
 		r.becomeLeader()
@@ -233,8 +233,8 @@ func (r *Raft) tick() {
 		//维护electionElapsed
 		case StateFollower:
 			r.electionElapsed++
-			if r.electionElapsed > r.electionTimeout+random+100000 {
-				msg := pb.Message{MsgType: pb.MessageType_MsgHup}
+			if r.electionElapsed > r.electionTimeout+random {
+				msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, To: r.id}
 				//将msg发送到本地的msgs,msgHup表示start a new election.
 				r.msgs = append(r.msgs, msg)
 				r.becomeCandidate()
@@ -353,8 +353,16 @@ func (r *Raft) Step(m pb.Message) error {
 			}
 		}
 	case StateLeader:
-		//发送心跳
-		if m.MsgType == pb.MessageType_MsgHeartbeat {
+		if m.MsgType == pb.MessageType_MsgBeat {
+			for _, peer := range r.peers {
+				if peer == r.id {
+					continue
+				} else {
+					r.sendHeartbeat(peer)
+				}
+			}
+			//发送心跳
+
 			r.sendHeartbeat(m.To)
 		}
 	}
@@ -373,8 +381,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 func (r *Raft) handleHeartbeat(m pb.Message) {
 	// Your Code Here (2A).
 	switch m.MsgType {
-	case pb.MessageType_MsgHup:
-		r.becomeCandidate()
+
 	case pb.MessageType_MsgRequestVote:
 		if m.Term > r.Term {
 			r.becomeFollower(m.Term, m.From)
@@ -392,7 +399,6 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 			r.becomeFollower(m.Term, m.From)
 			r.Term = m.Term
 			r.Lead = m.From
-			r.heartbeatElapsed = 0
 			r.electionElapsed = 0
 		}
 	}
