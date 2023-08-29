@@ -19,7 +19,6 @@ import (
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"math/rand"
 	"sync"
-	"time"
 )
 
 // None is a placeholder node ID used when there is no leader.
@@ -234,7 +233,7 @@ func (r *Raft) tick() {
 		//维护electionElapsed
 		case StateFollower:
 			r.electionElapsed++
-			if r.electionElapsed > r.electionTimeout+random+10000 {
+			if r.electionElapsed > r.electionTimeout+random+100000 {
 				msg := pb.Message{MsgType: pb.MessageType_MsgHup}
 				//将msg发送到本地的msgs,msgHup表示start a new election.
 				r.msgs = append(r.msgs, msg)
@@ -242,13 +241,13 @@ func (r *Raft) tick() {
 				r.electionElapsed = 0
 			}
 		case StateCandidate:
-			//todo 如何控制产生消息的时间
-			if r.electionElapsed <= r.electionTimeout+random && r.State == StateCandidate {
-				//推送hub消息给自己，表示开启一轮新的选举
-				msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, To: r.id}
-				r.msgs = append(r.msgs, msg)
-				time.Sleep(time.Duration(r.electionTimeout+random+10000) * time.Millisecond)
-			}
+			////todo 如何控制产生消息的时间 tick函数中的candidate需要做什么，需要控制它不推送一堆消息给msgs
+			//if r.electionElapsed <= r.electionTimeout+random && r.State == StateCandidate {
+			//	//推送hub消息给自己，表示开启一轮新的选举
+			//	msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, To: r.id, Commit: 99999}
+			//	r.msgs = append(r.msgs, msg)
+			//	time.Sleep(time.Duration(r.electionTimeout+random+10000) * time.Millisecond)
+			//}
 
 		//维护heartElapsed
 		case StateLeader:
@@ -286,6 +285,15 @@ func (r *Raft) becomeCandidate() {
 	r.Term += 1
 	//给自己投票
 	r.votes[r.id] = true
+
+	for _, peer := range r.peers {
+		if peer == r.id {
+			continue
+		} else {
+			r.sendHeartbeat(peer)
+		}
+	}
+
 }
 
 // becomeLeader transform this peer's state to leader
@@ -385,6 +393,7 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 			r.Term = m.Term
 			r.Lead = m.From
 			r.heartbeatElapsed = 0
+			r.electionElapsed = 0
 		}
 	}
 }
