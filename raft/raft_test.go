@@ -1639,6 +1639,7 @@ func (nw *network) send(msgs ...pb.Message) {
 		p.Step(m)
 		//处理完的消息丢弃
 		//时间过短的话，节点自己会给自己推送一堆hub消息
+		//从当前的peer中取出消息
 		msgs = append(msgs[1:], nw.filter(p.readMessages())...)
 	}
 }
@@ -1679,6 +1680,7 @@ func (nw *network) filter(msgs []pb.Message) []pb.Message {
 		}
 		switch m.MsgType {
 		case pb.MessageType_MsgHup:
+			fmt.Printf("hub msg from %d to %d\n", m.From, m.To)
 			// hups never go over the network, so don't drop them but panic
 			panic("unexpected MessageType_MsgHup")
 		default:

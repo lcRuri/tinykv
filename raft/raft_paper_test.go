@@ -84,8 +84,10 @@ func TestStartAsFollower2AA(t *testing.T) {
 // it will send a MessageType_MsgHeartbeat with m.Index = 0, m.LogTerm=0 and empty entries
 // as heartbeat to all followers.
 // Reference: section 5.2
+// 测试领导者广播心跳测试的是如果leader收到了一个心跳的tick，它将会发送一个消息类型为心跳并且index和term为0并且空日志作为心跳给其他的follower
 func TestLeaderBcastBeat2AA(t *testing.T) {
 	// heartbeat interval
+	//心跳间隔
 	hi := 1
 	r := newTestRaft(1, []uint64{1, 2, 3}, 10, hi, NewMemoryStorage())
 	r.becomeCandidate()
