@@ -221,17 +221,19 @@ func (r *Raft) sendHeartbeat(to uint64) {
 
 // tick advances the internal logical clock by a single tick.
 // 时钟周期使内部逻辑时钟提前一个时钟周期,用的都是逻辑时钟。tick是否要作为协程启动
+// 逻辑时钟
 func (r *Raft) tick() {
 	if len(r.peers) == 1 {
 		r.becomeLeader()
+		return
 	}
-	random := rand.Intn(1000) + 500
+	random := rand.Intn(10)
 	// Your Code Here (2A).
 	switch r.State {
 	//维护electionElapsed
 	case StateFollower:
 		r.electionElapsed++
-		if r.electionElapsed > r.electionTimeout+random {
+		if r.electionElapsed >= r.electionTimeout+random {
 			msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, To: r.id}
 			//将msg发送到本地的msgs,msgHup表示start a new election.
 			r.Step(msg)
@@ -240,11 +242,11 @@ func (r *Raft) tick() {
 		}
 	case StateCandidate:
 		r.electionElapsed++
-		if r.electionElapsed > r.electionTimeout+random {
+		if r.electionElapsed >= r.electionTimeout+random {
 			msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, To: r.id}
 			//将msg发送到本地的msgs,msgHup表示start a new election.
 			r.Step(msg)
-			r.becomeCandidate()
+
 			r.electionElapsed = 0
 		}
 
@@ -282,6 +284,7 @@ func (r *Raft) becomeCandidate() {
 	r.Term += 1
 	//给自己投票
 	r.votes[r.id] = true
+	r.electionElapsed = 0
 
 	for _, peer := range r.peers {
 		if peer == r.id {
@@ -313,6 +316,11 @@ func (r *Raft) becomeLeader() {
 // 查看eraftpb.proto来确定什么消息应该被处理
 func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
+	if len(r.peers) == 1 {
+		r.becomeLeader()
+		return nil
+	}
+
 	switch r.State {
 	case StateFollower:
 		//本地消息，需要发起一次election
