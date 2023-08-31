@@ -34,6 +34,7 @@ import (
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
 
+// 测试follower从消息中更新任期
 func TestFollowerUpdateTermFromMessage2AA(t *testing.T) {
 	testUpdateTermFromMessage(t, StateFollower)
 }
@@ -49,6 +50,8 @@ func TestLeaderUpdateTermFromMessage2AA(t *testing.T) {
 // value. If a candidate or leader discovers that its term is out of date,
 // it immediately reverts to follower state.
 // Reference: section 5.1
+// 更新从消息更新任期测试 如果一个服务器的当前任期小于其他的，接着它更新自己的目前任期变为更大的值
+// 如果一个候选者或者领导者发送它的任期已经过期，那么它就会恢复到follower状态
 func testUpdateTermFromMessage(t *testing.T, state StateType) {
 	r := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
 	switch state {
@@ -89,10 +92,12 @@ func TestLeaderBcastBeat2AA(t *testing.T) {
 	// heartbeat interval
 	//心跳间隔
 	hi := 1
+	//让id为1的称为领导者
 	r := newTestRaft(1, []uint64{1, 2, 3}, 10, hi, NewMemoryStorage())
 	r.becomeCandidate()
 	r.becomeLeader()
 
+	//消息的目的是为了append日志给leader
 	r.Step(pb.Message{MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{}}})
 	r.readMessages() // clear message
 
@@ -128,6 +133,9 @@ func TestCandidateStartNewElection2AA(t *testing.T) {
 // start a new election by incrementing its term and initiating another
 // round of RequestVote RPCs.
 // Reference: section 5.2
+// 没有leader开始选举测试 如果一个follower没有收到心跳超过了选举时间，那么它就会开始选举并且成为一个新的leadeer。
+// 它会自增自己的任期并且转换自己为候选者。它将会为自己投票并且并行发布请求投票rpc给集群中的其他server
+// 同意它也有可能失败获取大部分选票，它将会超时并且重新开启一轮新的选举通过增加它的任期、重新初始新的一轮请求投票rpc
 func testNonleaderStartElection(t *testing.T, state StateType) {
 	// election timeout
 	et := 10

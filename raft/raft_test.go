@@ -191,7 +191,9 @@ func TestLeaderElectionOverwriteNewerLogs2AB(t *testing.T) {
 func TestVoteFromAnyState2AA(t *testing.T) {
 	vt := pb.MessageType_MsgRequestVote
 	vt_resp := pb.MessageType_MsgRequestVoteResponse
+	//从follower到leader，进行不同的操作
 	for st := StateType(0); st <= StateLeader; st++ {
+		//id为1的节点
 		r := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
 		r.Term = 1
 
@@ -204,12 +206,16 @@ func TestVoteFromAnyState2AA(t *testing.T) {
 			r.becomeCandidate()
 			r.becomeLeader()
 		}
+
+		//清除id为1的msgs
 		r.readMessages() // clear message
 
 		// Note that setting our state above may have advanced r.Term
 		// past its initial value.
+		// 注意，在上面设置我们的状态可能会提前r.Term 超过初始值。
 		newTerm := r.Term + 1
 
+		//请求投票消息
 		msg := pb.Message{
 			From:    2,
 			To:      1,
@@ -218,13 +224,17 @@ func TestVoteFromAnyState2AA(t *testing.T) {
 			LogTerm: newTerm,
 			Index:   42,
 		}
+		//发送消息
 		if err := r.Step(msg); err != nil {
 			t.Errorf("%s,%s: Step failed: %s", vt, st, err)
 		}
+		//如果没有响应消息并且响应消息不为1的话，报错
 		if len(r.msgs) != 1 {
 			t.Errorf("%s,%s: %d response messages, want 1: %+v", vt, st, len(r.msgs), r.msgs)
 		} else {
+			//响应消息为1取出进行类型判断
 			resp := r.msgs[0]
+			//不是响应消息类型
 			if resp.MsgType != vt_resp {
 				t.Errorf("%s,%s: response message is %s, want %s",
 					vt, st, resp.MsgType, vt_resp)
@@ -235,6 +245,7 @@ func TestVoteFromAnyState2AA(t *testing.T) {
 		}
 
 		// If this was a vote, we reset our state and term.
+		// 如果这是一个投票，我们重置我们的状态和任期
 		if r.State != StateFollower {
 			t.Errorf("%s,%s: state %s, want %s", vt, st, r.State, StateFollower)
 		}
@@ -480,6 +491,7 @@ func TestCandidateConcede2AB(t *testing.T) {
 	}
 }
 
+// 测试单个节点候选
 func TestSingleNodeCandidate2AA(t *testing.T) {
 	tt := newNetwork(nil)
 	tt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
@@ -758,6 +770,7 @@ func TestCandidateResetTermMessageType_MsgAppend2AA(t *testing.T) {
 // testCandidateResetTerm tests when a candidate receives a
 // MessageType_MsgHeartbeat or MessageType_MsgAppend from leader, "Step" resets the term
 // with leader's and reverts back to follower.
+// testCandidateResetTerm tests 当一个候选者从leader那收到一个心跳或者增加消息，step方法会重置为leader的任期并且恢复为follower
 func testCandidateResetTerm(t *testing.T, mt pb.MessageType) {
 	a := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
 	b := newTestRaft(2, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
@@ -797,6 +810,7 @@ func testCandidateResetTerm(t *testing.T, mt pb.MessageType) {
 
 	// leader sends to isolated candidate
 	// and expects candidate to revert to follower
+	// leader发送给一个被隔开的candida,期待candidate变为follower
 	nt.send(pb.Message{From: 1, To: 3, Term: a.Term, MsgType: mt})
 
 	if c.State != StateFollower {
@@ -1589,6 +1603,10 @@ type network struct {
 // A nil node will be replaced with a new *stateMachine.
 // A *stateMachine will get its k, id.
 // When using stateMachine, the address list is always [1, n].
+// newNetwork从peers中初始化一个网络
+// nil的话将会用一个新的stateMachine替代
+// 一个stateMachine将会得到它的数量，id
+// 当使用stateMachine，地址列表总是【1，n】
 func newNetwork(peers ...stateMachine) *network {
 	return newNetworkWithConfig(nil, peers...)
 }
