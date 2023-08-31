@@ -225,42 +225,39 @@ func (r *Raft) tick() {
 	if len(r.peers) == 1 {
 		r.becomeLeader()
 	}
-	random := rand.Intn(1000) + 50
+	random := rand.Intn(1000) + 500
 	// Your Code Here (2A).
-	for {
+	switch r.State {
+	//维护electionElapsed
+	case StateFollower:
+		r.electionElapsed++
+		if r.electionElapsed > r.electionTimeout+random {
+			msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, To: r.id}
+			//将msg发送到本地的msgs,msgHup表示start a new election.
+			r.Step(msg)
+			r.becomeCandidate()
+			r.electionElapsed = 0
+		}
+	case StateCandidate:
+		r.electionElapsed++
+		if r.electionElapsed > r.electionTimeout+random {
+			msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, To: r.id}
+			//将msg发送到本地的msgs,msgHup表示start a new election.
+			r.Step(msg)
+			r.becomeCandidate()
+			r.electionElapsed = 0
+		}
 
-		switch r.State {
-		//维护electionElapsed
-		case StateFollower:
-			r.electionElapsed++
-			if r.electionElapsed > r.electionTimeout+random {
-				msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, To: r.id}
-				//将msg发送到本地的msgs,msgHup表示start a new election.
-				r.msgs = append(r.msgs, msg)
-				r.becomeCandidate()
-				r.electionElapsed = 0
-			}
-		case StateCandidate:
-			////todo 如何控制产生消息的时间 tick函数中的candidate需要做什么，需要控制它不推送一堆消息给msgs
-			//if r.electionElapsed <= r.electionTimeout+random && r.State == StateCandidate {
-			//	//推送hub消息给自己，表示开启一轮新的选举
-			//	msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, To: r.id, Commit: 99999}
-			//	r.msgs = append(r.msgs, msg)
-			//	time.Sleep(time.Duration(r.electionTimeout+random+10000) * time.Millisecond)
-			//}
-
-		//维护heartElapsed
-		case StateLeader:
-			r.heartbeatElapsed++
-			//当heartbeatElapsed超过heartbeatTimeout，发送心跳
-			if r.heartbeatElapsed > r.heartbeatTimeout {
-				msg := pb.Message{MsgType: pb.MessageType_MsgBeat}
-				r.msgs = append(r.msgs, msg)
-				r.electionElapsed = 0
-			}
+	//维护heartElapsed
+	case StateLeader:
+		r.heartbeatElapsed++
+		//当heartbeatElapsed超过heartbeatTimeout，发送心跳
+		if r.heartbeatElapsed >= r.heartbeatTimeout {
+			msg := pb.Message{MsgType: pb.MessageType_MsgBeat}
+			r.Step(msg)
+			r.electionElapsed = 0
 		}
 	}
-
 }
 
 // becomeFollower transform this peer's state to Follower
@@ -341,7 +338,7 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 
 		if m.MsgType == pb.MessageType_MsgRequestVote {
-			r.sendHeartbeat(m.To)
+			r.handleHeartbeat(m)
 		}
 
 		//收到响应
@@ -361,9 +358,10 @@ func (r *Raft) Step(m pb.Message) error {
 					r.sendHeartbeat(peer)
 				}
 			}
-			//发送心跳
+		}
 
-			r.sendHeartbeat(m.To)
+		if m.MsgType == pb.MessageType_MsgRequestVote {
+			r.handleHeartbeat(m)
 		}
 	}
 	return nil
