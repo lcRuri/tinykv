@@ -315,15 +315,19 @@ func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
 	switch r.State {
 	case StateFollower:
-		//处理来自candidate和leader的请求
+		//本地消息，需要发起一次election
 		if m.MsgType == pb.MessageType_MsgHup {
 			r.becomeCandidate()
 		}
 
+		//处理心跳或者请求投票
 		if m.MsgType == pb.MessageType_MsgBeat || m.MsgType == pb.MessageType_MsgRequestVote {
 			r.handleHeartbeat(m)
 		}
 
+		if m.MsgType == pb.MessageType_MsgAppend {
+			r.handleAppendEntries(m)
+		}
 	case StateCandidate:
 		//发起投票
 		if m.MsgType == pb.MessageType_MsgHup {
@@ -349,6 +353,10 @@ func (r *Raft) Step(m pb.Message) error {
 				r.becomeLeader()
 			}
 		}
+
+		if m.MsgType == pb.MessageType_MsgAppend {
+			r.handleAppendEntries(m)
+		}
 	case StateLeader:
 		if m.MsgType == pb.MessageType_MsgBeat {
 			for _, peer := range r.peers {
@@ -363,6 +371,10 @@ func (r *Raft) Step(m pb.Message) error {
 		if m.MsgType == pb.MessageType_MsgRequestVote {
 			r.handleHeartbeat(m)
 		}
+
+		if m.MsgType == pb.MessageType_MsgAppend {
+			r.handleAppendEntries(m)
+		}
 	}
 	return nil
 }
@@ -371,7 +383,18 @@ func (r *Raft) Step(m pb.Message) error {
 // handleAppendEntries处理添加日志的RPC请求
 func (r *Raft) handleAppendEntries(m pb.Message) {
 	// Your Code Here (2A).
+	//处理请求添加日志消息，目前不处理添加日志请求，只处理任期更改请求
+	if m.Term > r.Term {
+		r.becomeFollower(m.Term, m.From)
+		r.Term = m.Term
+		r.Vote = m.From
+		r.Lead = m.From
+		r.electionElapsed = 0
 
+		//返回响应
+		msg := pb.Message{MsgType: pb.MessageType_MsgAppendResponse, From: r.id, To: m.From}
+		r.msgs = append(r.msgs, msg)
+	}
 }
 
 // handleHeartbeat handle Heartbeat RPC request
