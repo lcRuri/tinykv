@@ -177,6 +177,10 @@ func testNonleaderStartElection(t *testing.T, state StateType) {
 // b) it loses the election
 // c) it is unclear about the result
 // Reference: section 5.2
+// 测试领导者选举在一轮rpc中，测试所有可能会发送在一轮leader election的情况
+// a) 赢得选举
+// b）失败
+// c）对结果不清楚
 func TestLeaderElectionInOneRoundRPC2AA(t *testing.T) {
 	tests := []struct {
 		size  int
@@ -217,6 +221,7 @@ func TestLeaderElectionInOneRoundRPC2AA(t *testing.T) {
 // TestFollowerVote tests that each follower will vote for at most one
 // candidate in a given term, on a first-come-first-served basis.
 // Reference: section 5.2
+// 测试follower投票 每个follower将会投票给至多一个候选者在一个给定的任期中,先到先得
 func TestFollowerVote2AA(t *testing.T) {
 	tests := []struct {
 		vote    uint64
@@ -285,6 +290,7 @@ func TestCandidateElectionTimeoutRandomized2AA(t *testing.T) {
 // testNonleaderElectionTimeoutRandomized tests that election timeout for
 // follower or candidate is randomized.
 // Reference: section 5.2
+// 测试无领导者选举超时随机 测试随机对follower和candidate超时
 func testNonleaderElectionTimeoutRandomized(t *testing.T, state StateType) {
 	et := 10
 	r := newTestRaft(1, []uint64{1, 2, 3}, et, 1, NewMemoryStorage())
@@ -298,6 +304,7 @@ func testNonleaderElectionTimeoutRandomized(t *testing.T, state StateType) {
 		}
 
 		time := 0
+		//没有收到消息，意味着没有心跳
 		for len(r.readMessages()) == 0 {
 			r.tick()
 			time++
@@ -323,6 +330,7 @@ func TestCandidatesElectionTimeoutNonconflict2AA(t *testing.T) {
 // single server(follower or candidate) will time out, which reduces the
 // likelihood of split vote in the new election.
 // Reference: section 5.2
+// 测试无领导者选举超时没有冲突 测试在大多数情况下只有一个server(候选者或者follower)将会超时，降低了在新的选举分裂投票的可能性
 func testNonleadersElectionTimeoutNonconflict(t *testing.T, state StateType) {
 	et := 10
 	size := 5

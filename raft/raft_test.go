@@ -776,8 +776,10 @@ func testCandidateResetTerm(t *testing.T, mt pb.MessageType) {
 	b := newTestRaft(2, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
 	c := newTestRaft(3, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
 
+	//创建a，b，c的network
 	nt := newNetwork(a, b, c)
 
+	//让id为1的节点开启选举
 	nt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
 	if a.State != StateLeader {
 		t.Errorf("state = %s, want %s", a.State, StateLeader)
@@ -790,11 +792,14 @@ func testCandidateResetTerm(t *testing.T, mt pb.MessageType) {
 	}
 
 	// isolate 3 and increase term in rest
+	// 将3隔离并且增加任期
 	nt.isolate(3)
 
+	//让1和2重新开始选举
 	nt.send(pb.Message{From: 2, To: 2, MsgType: pb.MessageType_MsgHup})
 	nt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
 
+	//为什么2是leader而1follower呢
 	if a.State != StateLeader {
 		t.Errorf("state = %s, want %s", a.State, StateLeader)
 	}
@@ -806,6 +811,7 @@ func testCandidateResetTerm(t *testing.T, mt pb.MessageType) {
 		c.tick()
 	}
 
+	//恢复
 	nt.recover()
 
 	// leader sends to isolated candidate
@@ -1205,6 +1211,7 @@ func TestCampaignWhileLeader2AA(t *testing.T) {
 	}
 	// We don't call campaign() directly because it comes after the check
 	// for our current state.
+	// 我们不直接使用campaign()方法因为它出现在检查我们目前的状态之后
 	r.Step(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
 	if r.State != StateLeader {
 		t.Errorf("expected single-node election to become leader but got %s", r.State)
