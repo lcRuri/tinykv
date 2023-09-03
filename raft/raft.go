@@ -223,11 +223,12 @@ func (r *Raft) sendHeartbeat(to uint64) {
 // 时钟周期使内部逻辑时钟提前一个时钟周期,用的都是逻辑时钟。tick是否要作为协程启动
 // 逻辑时钟
 func (r *Raft) tick() {
-	if len(r.peers) == 1 {
+	if len(r.peers) == 1 && r.State == StateFollower {
+		r.becomeCandidate()
 		r.becomeLeader()
 		return
 	}
-	random := rand.Intn(10)
+	random := rand.Intn(20)
 	// Your Code Here (2A).
 	switch r.State {
 	//维护electionElapsed
@@ -237,7 +238,7 @@ func (r *Raft) tick() {
 			msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, To: r.id}
 			//将msg发送到本地的msgs,msgHup表示start a new election.
 			r.Step(msg)
-			r.becomeCandidate()
+
 			r.electionElapsed = 0
 		}
 	case StateCandidate:
@@ -286,14 +287,6 @@ func (r *Raft) becomeCandidate() {
 	r.votes[r.id] = true
 	r.electionElapsed = 0
 
-	for _, peer := range r.peers {
-		if peer == r.id {
-			continue
-		} else {
-			r.sendHeartbeat(peer)
-		}
-	}
-
 }
 
 // becomeLeader transform this peer's state to leader
@@ -316,7 +309,8 @@ func (r *Raft) becomeLeader() {
 // 查看eraftpb.proto来确定什么消息应该被处理
 func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
-	if len(r.peers) == 1 {
+	if len(r.peers) == 1 && r.State == StateFollower {
+		r.becomeCandidate()
 		r.becomeLeader()
 		return nil
 	}
@@ -326,6 +320,13 @@ func (r *Raft) Step(m pb.Message) error {
 		//本地消息，需要发起一次election
 		if m.MsgType == pb.MessageType_MsgHup {
 			r.becomeCandidate()
+			for _, peer := range r.peers {
+				if peer == r.id {
+					continue
+				} else {
+					r.sendHeartbeat(peer)
+				}
+			}
 		}
 
 		//处理心跳或者请求投票
@@ -339,14 +340,14 @@ func (r *Raft) Step(m pb.Message) error {
 	case StateCandidate:
 		//发起投票
 		if m.MsgType == pb.MessageType_MsgHup {
+			r.becomeCandidate()
 			for _, peer := range r.peers {
 				if peer == r.id {
 					continue
 				} else {
-					r.sendHeartbeat(m.To)
+					r.sendHeartbeat(peer)
 				}
 			}
-
 		}
 
 		if m.MsgType == pb.MessageType_MsgRequestVote {
@@ -354,7 +355,7 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 
 		//收到响应
-		if m.MsgType == pb.MessageType_MsgRequestVoteResponse {
+		if m.MsgType == pb.MessageType_MsgRequestVoteResponse && m.Reject == false {
 			//todo
 			r.votes[m.From] = true
 			if len(r.votes) > len(r.peers)/2 {
@@ -364,6 +365,10 @@ func (r *Raft) Step(m pb.Message) error {
 
 		if m.MsgType == pb.MessageType_MsgAppend {
 			r.handleAppendEntries(m)
+		}
+
+		if m.MsgType == pb.MessageType_MsgHeartbeat {
+			r.handleHeartbeat(m)
 		}
 	case StateLeader:
 		if m.MsgType == pb.MessageType_MsgBeat {
@@ -392,7 +397,9 @@ func (r *Raft) Step(m pb.Message) error {
 func (r *Raft) handleAppendEntries(m pb.Message) {
 	// Your Code Here (2A).
 	//处理请求添加日志消息，目前不处理添加日志请求，只处理任期更改请求
-	if m.Term > r.Term {
+	//todo m.Term == r.Term && r.State != StateFollower 为什么这个条件也同意
+	//If AppendEntries RPC received from new leader: convert to follower
+	if m.Term > r.Term || (m.Term == r.Term && r.State != StateFollower) {
 		r.becomeFollower(m.Term, m.From)
 		r.Term = m.Term
 		r.Vote = m.From
@@ -412,7 +419,8 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 	switch m.MsgType {
 
 	case pb.MessageType_MsgRequestVote:
-		if m.Term > r.Term {
+		//消息的任期大于节点本身
+		if m.Term > r.Term || r.Vote == m.From {
 			r.becomeFollower(m.Term, m.From)
 			r.Term = m.Term
 			r.Vote = m.From
@@ -420,10 +428,29 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 			r.electionElapsed = 0
 
 			//返回响应
-			msg := pb.Message{MsgType: pb.MessageType_MsgRequestVoteResponse, From: r.id, To: m.From}
+			msg := pb.Message{MsgType: pb.MessageType_MsgRequestVoteResponse, From: r.id, To: m.From, Term: m.Term, Reject: m.Reject}
 			r.msgs = append(r.msgs, msg)
 		}
-	case pb.MessageType_MsgBeat:
+		//如果任期相同并且没有投过票或者已经为请求投票的透过票
+		if m.Term == r.Term && r.Vote == 0 {
+			r.becomeFollower(m.Term, m.From)
+			r.Term = m.Term
+			r.Vote = m.From
+			r.Lead = m.From
+			r.electionElapsed = 0
+
+			//返回响应
+			msg := pb.Message{MsgType: pb.MessageType_MsgRequestVoteResponse, From: r.id, To: m.From, Term: m.Term, Reject: m.Reject}
+			r.msgs = append(r.msgs, msg)
+		}
+		//如果任期相同但是已经投过票并且还不是为请求投票投的票
+		if m.Term == r.Term && r.Vote != m.From {
+			msg := pb.Message{MsgType: pb.MessageType_MsgRequestVoteResponse, From: r.id, To: m.From, Term: m.Term, Reject: true}
+			r.msgs = append(r.msgs, msg)
+		}
+
+		//任期小于节点本身的任期
+	case pb.MessageType_MsgHeartbeat:
 		if m.Term >= r.Term {
 			r.becomeFollower(m.Term, m.From)
 			r.Term = m.Term
