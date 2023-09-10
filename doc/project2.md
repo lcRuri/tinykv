@@ -10,6 +10,8 @@ Raft 是一种[共识算法](https://so.csdn.net/so/search?q=共识算法&spm=10
 - **在 Raft 之上建立一个容错的KV服务**
 - **增加对 raftlog GC 和快照的支持**
 
+资料：https://zhuanlan.zhihu.com/p/461403726
+
 ## Part A
 
 ### 代码
