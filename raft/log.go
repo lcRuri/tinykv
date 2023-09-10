@@ -38,7 +38,7 @@ type RaftLog struct {
 	// been instructed to apply to its state machine.
 	// Invariant: applied <= committed
 	// 已经用于状态机 applied<=commited
-	// 大部分peer已经applied之后，commited才能更新
+	// 大部分peer已经commited之后，applied
 	applied uint64
 
 	// log entries with index <= stabled are persisted to storage.
