@@ -905,10 +905,12 @@ func (s messageSlice) Len() int           { return len(s) }
 func (s messageSlice) Less(i, j int) bool { return fmt.Sprint(s[i]) < fmt.Sprint(s[j]) }
 func (s messageSlice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
+// 提交日志
 func commitNoopEntry(r *Raft, s *MemoryStorage) {
 	if r.State != StateLeader {
 		panic("it should only be used when it is the leader")
 	}
+
 	for id := range r.Prs {
 		if id == r.id {
 			continue
@@ -917,20 +919,26 @@ func commitNoopEntry(r *Raft, s *MemoryStorage) {
 		r.sendAppend(id)
 	}
 	// simulate the response of MessageType_MsgAppend
+	// 模拟MessageType_MsgAppend的响应
 	msgs := r.readMessages()
 	for _, m := range msgs {
+		//
 		if m.MsgType != pb.MessageType_MsgAppend || len(m.Entries) != 1 || m.Entries[0].Data != nil {
 			panic("not a message to append noop entry")
 		}
 		r.Step(acceptAndReply(m))
 	}
 	// ignore further messages to refresh followers' commit index
+	// 通过忽略以后的消息来刷新follower的提交的index
 	r.readMessages()
+	//将不稳定的日志添加到storage中
 	s.Append(r.RaftLog.unstableEntries())
+	//更新applied和lastindex
 	r.RaftLog.applied = r.RaftLog.committed
 	r.RaftLog.stabled = r.RaftLog.LastIndex()
 }
 
+// 接受消息并且响应
 func acceptAndReply(m pb.Message) pb.Message {
 	if m.MsgType != pb.MessageType_MsgAppend {
 		panic("type should be MessageType_MsgAppend")

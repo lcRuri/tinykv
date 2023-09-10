@@ -26,23 +26,31 @@ import pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 // that not truncated
 type RaftLog struct {
 	// storage contains all stable entries since the last snapshot.
+	// storage存储了所有自从上次快照以来稳定的日志
 	storage Storage
 
 	// committed is the highest log position that is known to be in
 	// stable storage on a quorum of nodes.
+	// commited是已知处于的最高日志位置 节点仲裁上的稳定存储。
 	committed uint64
 
 	// applied is the highest log position that the application has
 	// been instructed to apply to its state machine.
 	// Invariant: applied <= committed
+	// 已经用于状态机 applied<=commited
+	// 大部分peer已经applied之后，commited才能更新
 	applied uint64
 
 	// log entries with index <= stabled are persisted to storage.
 	// It is used to record the logs that are not persisted by storage yet.
 	// Everytime handling `Ready`, the unstabled logs will be included.
+	// 日志小于这个字段将会被持久化到storage
+	// 它用于记录还没有被持久化的日志
+	// 每次处理Ready，不稳定的logs将会被包括
 	stabled uint64
 
 	// all entries that have not yet compact.
+	// 所有尚未压缩的条目
 	entries []pb.Entry
 
 	// the incoming unstable snapshot, if any.
@@ -57,7 +65,11 @@ type RaftLog struct {
 func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
 	raftLog := &RaftLog{
-		storage: storage,
+		storage:   storage,
+		committed: 0,
+		applied:   0,
+		stabled:   0,
+		entries:   make([]pb.Entry, 0),
 	}
 
 	return raftLog

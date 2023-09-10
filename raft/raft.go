@@ -121,6 +121,7 @@ type Raft struct {
 	RaftLog *RaftLog
 
 	// log replication progress of each peers
+	// 记录每个对等方的复制进度 匹配的日志索引和下一个日志索引
 	Prs map[uint64]*Progress
 
 	// this peer's role
@@ -170,6 +171,7 @@ func newRaft(c *Config) *Raft {
 	}
 	// Your Code Here (2A).
 	raft := &Raft{
+		//2AA
 		id:               c.ID,
 		heartbeatTimeout: c.HeartbeatTick,
 		electionTimeout:  c.ElectionTick,
@@ -179,9 +181,10 @@ func newRaft(c *Config) *Raft {
 		heartbeatElapsed: 0,
 		peers:            c.peers,
 		votes:            map[uint64]bool{},
+		//2AB
+		RaftLog: newLog(c.Storage),
+		Prs:     map[uint64]*Progress{},
 	}
-
-	//go raft.tick()
 
 	return raft
 }
@@ -191,7 +194,18 @@ func newRaft(c *Config) *Raft {
 // sendAppend发送一个携带新的日志的RPC和目前已经提交的日志索引给发送的peer，返回为真如果消息发送了
 func (r *Raft) sendAppend(to uint64) bool {
 	// Your Code Here (2A).
+	if r.State != StateLeader {
+		return false
+	}
 
+	msg := pb.Message{
+		MsgType: pb.MessageType_MsgAppend,
+		To:      to,
+		From:    r.id,
+		Term:    r.Term,
+	}
+
+	r.msgs = append(r.msgs, msg)
 	return false
 }
 
@@ -300,7 +314,14 @@ func (r *Raft) becomeLeader() {
 	r.State = StateLeader
 
 	//todo 重新初始化Match, Next uint64
-
+	for _, peer := range r.peers {
+		r.Prs[peer] = &Progress{Match: 0}
+		if len(r.msgs) == 0 {
+			r.Prs[peer].Match = 0
+		} else {
+			r.Prs[peer].Next = r.msgs[len(r.msgs)-1].Index
+		}
+	}
 }
 
 // Step the entrance of handle message, see `MessageType`
@@ -356,7 +377,7 @@ func (r *Raft) Step(m pb.Message) error {
 
 		//收到响应
 		if m.MsgType == pb.MessageType_MsgRequestVoteResponse && m.Reject == false {
-			//todo
+
 			r.votes[m.From] = true
 			if len(r.votes) > len(r.peers)/2 {
 				r.becomeLeader()
