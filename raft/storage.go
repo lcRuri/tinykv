@@ -81,6 +81,8 @@ type MemoryStorage struct {
 	hardState pb.HardState
 	snapshot  pb.Snapshot
 	// ents[i] has raft log position i+snapshot.Metadata.Index
+	// 存储紧跟着快照数据的日志条目数组，即ents[i]保存的日志数据索引位置为i + snapshot.Metadata.Index
+	// 快照 日志条目数组
 	ents []pb.Entry
 }
 
@@ -88,6 +90,7 @@ type MemoryStorage struct {
 func NewMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{
 		// When starting from scratch populate the list with a dummy entry at term zero.
+		// 从头开始时，在任期为0时使用虚拟条目填充列表。
 		ents:     make([]pb.Entry, 1),
 		snapshot: pb.Snapshot{Metadata: &pb.SnapshotMetadata{ConfState: &pb.ConfState{}}},
 	}
