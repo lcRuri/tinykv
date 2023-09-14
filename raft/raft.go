@@ -198,11 +198,24 @@ func (r *Raft) sendAppend(to uint64) bool {
 		return false
 	}
 
+	// todo
+	entries := make([]*pb.Entry, 0)
+	for i := r.Prs[to].Match; i <= r.Prs[to].Next; i++ {
+		entry := pb.Entry{
+			EntryType: 0,
+			Term:      0,
+			Index:     0,
+			Data:      nil,
+		}
+
+		entries = append(entries, &entry)
+	}
 	msg := pb.Message{
 		MsgType: pb.MessageType_MsgAppend,
 		To:      to,
 		From:    r.id,
 		Term:    r.Term,
+		Entries: entries,
 	}
 
 	r.msgs = append(r.msgs, msg)
@@ -322,6 +335,8 @@ func (r *Raft) becomeLeader() {
 			r.Prs[peer].Next = r.msgs[len(r.msgs)-1].Index
 		}
 	}
+
+	//发送一条消息 截断之前的消息 leader只能处理自己任期的消息
 }
 
 // Step the entrance of handle message, see `MessageType`
@@ -409,7 +424,42 @@ func (r *Raft) Step(m pb.Message) error {
 		if m.MsgType == pb.MessageType_MsgAppend {
 			r.handleAppendEntries(m)
 		}
+
+		//append data to the leader's log entries.
+		//todo 对于index的处理
+		if m.MsgType == pb.MessageType_MsgPropose {
+			for _, peer := range r.peers {
+				if peer == r.id {
+					continue
+				}
+
+				entries := []*pb.Entry{}
+				for _, e := range m.Entries {
+					entry := &pb.Entry{
+						Term:  r.Term,
+						Index: uint64(len(r.msgs) + 1),
+						Data:  e.Data,
+					}
+					entries = append(entries, entry)
+				}
+
+				msg := pb.Message{
+					MsgType: pb.MessageType_MsgAppend,
+					To:      peer,
+					From:    r.id,
+					Term:    r.Term,
+					LogTerm: r.Term,
+					Index:   uint64(len(r.msgs)),
+					Entries: entries,
+				}
+
+				r.msgs = append(r.msgs, msg)
+			}
+
+		}
+
 	}
+
 	return nil
 }
 
