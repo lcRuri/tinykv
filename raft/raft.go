@@ -430,6 +430,14 @@ func (r *Raft) Step(m pb.Message) error {
 		if m.MsgType == pb.MessageType_MsgPropose {
 			for _, peer := range r.peers {
 				if peer == r.id {
+					for _, e := range m.Entries {
+						entry := pb.Entry{
+							Term:  r.Term,
+							Index: r.RaftLog.LastIndex() + 1,
+							Data:  e.Data,
+						}
+						r.RaftLog.entries = append(r.RaftLog.entries, entry)
+					}
 					continue
 				}
 
@@ -437,9 +445,10 @@ func (r *Raft) Step(m pb.Message) error {
 				for _, e := range m.Entries {
 					entry := &pb.Entry{
 						Term:  r.Term,
-						Index: uint64(len(r.msgs) + 1),
+						Index: r.RaftLog.LastIndex(),
 						Data:  e.Data,
 					}
+
 					entries = append(entries, entry)
 				}
 
@@ -449,7 +458,7 @@ func (r *Raft) Step(m pb.Message) error {
 					From:    r.id,
 					Term:    r.Term,
 					LogTerm: r.Term,
-					Index:   uint64(len(r.msgs)),
+					Index:   r.Prs[peer].Match,
 					Entries: entries,
 				}
 
