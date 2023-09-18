@@ -199,27 +199,28 @@ func (r *Raft) sendAppend(to uint64) bool {
 		return false
 	}
 
-	entries := make([]*pb.Entry, 0)
-	for i := r.Prs[to].Match; i <= r.Prs[to].Next; i++ {
-		entry := pb.Entry{
-			EntryType: 0,
-			Term:      0,
-			Index:     0,
-			Data:      nil,
+	//取出leader中所有的msg发送给peer
+	for i := r.Prs[to].Match; i < uint64(len(r.RaftLog.entries)); i++ {
+		entries := make([]*pb.Entry, 0)
+		for _, entry := range r.RaftLog.entries {
+			entries = append(entries, &entry)
 		}
 
-		entries = append(entries, &entry)
-	}
-	msg := pb.Message{
-		MsgType: pb.MessageType_MsgAppend,
-		To:      to,
-		From:    r.id,
-		Term:    r.Term,
-		Entries: entries,
+		msg := pb.Message{
+			MsgType: pb.MessageType_MsgAppend,
+			To:      to,
+			From:    r.id,
+			Term:    r.Term,
+			LogTerm: r.RaftLog.entries[i].Term,
+			Index:   i,
+			Entries: entries,
+			Commit:  r.RaftLog.committed,
+		}
+
+		r.msgs = append(r.msgs, msg)
 	}
 
-	r.msgs = append(r.msgs, msg)
-	return false
+	return true
 }
 
 // sendHeartbeat sends a heartbeat RPC to the given peer.
@@ -426,57 +427,31 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 
 		if m.MsgType == pb.MessageType_MsgPropose {
+			//将msg保存到leader本地
+			for _, e := range m.Entries {
+				entry := pb.Entry{
+					Term:  r.Term,
+					Index: r.RaftLog.LastIndex() + 1,
+					Data:  e.Data,
+				}
+				r.RaftLog.entries = append(r.RaftLog.entries, entry)
+				if len(r.peers) == 1 {
+					r.RaftLog.committed++
+				}
+			}
 			for _, peer := range r.peers {
-				//leader处理日志
 				if peer == r.id {
-					for _, e := range m.Entries {
-						entry := pb.Entry{
-							Term:  r.Term,
-							Index: r.RaftLog.LastIndex() + 1,
-							Data:  e.Data,
-						}
-						r.RaftLog.entries = append(r.RaftLog.entries, entry)
-						r.resp++
-					}
 					continue
 				}
 
-				//follower处理日志
-				entries := []*pb.Entry{}
-				for _, e := range m.Entries {
-					entry := &pb.Entry{
-						Term:  r.Term,
-						Index: r.RaftLog.LastIndex(),
-						Data:  e.Data,
-					}
-
-					entries = append(entries, entry)
-				}
-
-				msg := pb.Message{
-					MsgType: pb.MessageType_MsgAppend,
-					To:      peer,
-					From:    r.id,
-					Term:    r.Term,
-					LogTerm: r.Term,
-					Index:   r.Prs[peer].Match,
-					Entries: entries,
-				}
-
-				r.msgs = append(r.msgs, msg)
+				r.sendAppend(peer)
 			}
-
 		}
 
 		if m.MsgType == pb.MessageType_MsgAppendResponse {
 			if m.Reject == false {
 				//todo
-				r.Prs[m.From].Match = r.RaftLog.LastIndex()
-				r.resp++
-				if r.resp > len(r.peers)/2 {
-					r.resp = 0
-					r.RaftLog.committed++
-				}
+
 			}
 		}
 
@@ -501,6 +476,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 
 		//todo 处理日志 raftlog.storage.ents
 		//r.RaftLog.entries = append(r.RaftLog.entries, m.Entries)
+
 		for _, entry := range m.Entries {
 			r.RaftLog.entries = append(r.RaftLog.entries, *entry)
 		}
