@@ -116,6 +116,7 @@ type Raft struct {
 
 	mu    *sync.Mutex
 	peers []uint64
+	resp  int
 
 	// the log
 	RaftLog *RaftLog
@@ -198,7 +199,6 @@ func (r *Raft) sendAppend(to uint64) bool {
 		return false
 	}
 
-	// todo
 	entries := make([]*pb.Entry, 0)
 	for i := r.Prs[to].Match; i <= r.Prs[to].Next; i++ {
 		entry := pb.Entry{
@@ -326,7 +326,6 @@ func (r *Raft) becomeLeader() {
 	//变更状态
 	r.State = StateLeader
 
-	//todo 重新初始化Match, Next uint64
 	for _, peer := range r.peers {
 		r.Prs[peer] = &Progress{Match: 0}
 		if len(r.msgs) == 0 {
@@ -337,6 +336,7 @@ func (r *Raft) becomeLeader() {
 	}
 
 	//发送一条消息 截断之前的消息 leader只能处理自己任期的消息
+	r.sendAppend(r.id)
 }
 
 // Step the entrance of handle message, see `MessageType`
@@ -425,10 +425,9 @@ func (r *Raft) Step(m pb.Message) error {
 			r.handleAppendEntries(m)
 		}
 
-		//append data to the leader's log entries.
-		//todo 对于index的处理
 		if m.MsgType == pb.MessageType_MsgPropose {
 			for _, peer := range r.peers {
+				//leader处理日志
 				if peer == r.id {
 					for _, e := range m.Entries {
 						entry := pb.Entry{
@@ -437,10 +436,12 @@ func (r *Raft) Step(m pb.Message) error {
 							Data:  e.Data,
 						}
 						r.RaftLog.entries = append(r.RaftLog.entries, entry)
+						r.resp++
 					}
 					continue
 				}
 
+				//follower处理日志
 				entries := []*pb.Entry{}
 				for _, e := range m.Entries {
 					entry := &pb.Entry{
@@ -467,6 +468,18 @@ func (r *Raft) Step(m pb.Message) error {
 
 		}
 
+		if m.MsgType == pb.MessageType_MsgAppendResponse {
+			if m.Reject == false {
+				//todo
+				r.Prs[m.From].Match = r.RaftLog.LastIndex()
+				r.resp++
+				if r.resp > len(r.peers)/2 {
+					r.resp = 0
+					r.RaftLog.committed++
+				}
+			}
+		}
+
 	}
 
 	return nil
@@ -476,7 +489,7 @@ func (r *Raft) Step(m pb.Message) error {
 // handleAppendEntries处理添加日志的RPC请求
 func (r *Raft) handleAppendEntries(m pb.Message) {
 	// Your Code Here (2A).
-	//处理请求添加日志消息，目前不处理添加日志请求，只处理任期更改请求
+	//处理请求添加日志消息
 	//todo m.Term == r.Term && r.State != StateFollower 为什么这个条件也同意
 	//If AppendEntries RPC received from new leader: convert to follower
 	if m.Term > r.Term || (m.Term == r.Term && r.State != StateFollower) {
@@ -486,10 +499,21 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		r.Lead = m.From
 		r.electionElapsed = 0
 
+		//todo 处理日志 raftlog.storage.ents
+		//r.RaftLog.entries = append(r.RaftLog.entries, m.Entries)
+		for _, entry := range m.Entries {
+			r.RaftLog.entries = append(r.RaftLog.entries, *entry)
+		}
+
 		//返回响应
-		msg := pb.Message{MsgType: pb.MessageType_MsgAppendResponse, From: r.id, To: m.From}
+		msg := pb.Message{MsgType: pb.MessageType_MsgAppendResponse, From: r.id, To: m.From, Reject: false}
+		r.msgs = append(r.msgs, msg)
+
+	} else {
+		msg := pb.Message{MsgType: pb.MessageType_MsgAppendResponse, From: r.id, To: m.From, Reject: true}
 		r.msgs = append(r.msgs, msg)
 	}
+
 }
 
 // handleHeartbeat handle Heartbeat RPC request
