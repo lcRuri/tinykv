@@ -18,6 +18,7 @@ import (
 	"errors"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"math/rand"
+	"sort"
 	"sync"
 )
 
@@ -435,10 +436,13 @@ func (r *Raft) Step(m pb.Message) error {
 					Data:  e.Data,
 				}
 				r.RaftLog.entries = append(r.RaftLog.entries, entry)
+				r.Prs[r.id].Match = uint64(len(r.RaftLog.entries))
 				if len(r.peers) == 1 {
 					r.RaftLog.committed++
 				}
 			}
+
+			//向其他的节点发送添加日志请求
 			for _, peer := range r.peers {
 				if peer == r.id {
 					continue
@@ -449,10 +453,24 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 
 		if m.MsgType == pb.MessageType_MsgAppendResponse {
+
 			if m.Reject == false {
 				//todo
-
+				r.Prs[m.From].Match = m.Index
 			}
+			//收到响应后更新commited
+			matchInts := make([]uint64, 0)
+			for _, progress := range r.Prs {
+
+				matchInts = append(matchInts, progress.Match)
+			}
+
+			//排序为了找到中位数
+			sort.SliceIsSorted(matchInts, func(i, j int) bool {
+				return matchInts[i] < matchInts[j]
+			})
+
+			r.RaftLog.committed = matchInts[len(matchInts)/2]
 		}
 
 	}
