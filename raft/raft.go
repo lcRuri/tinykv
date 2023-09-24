@@ -200,27 +200,24 @@ func (r *Raft) sendAppend(to uint64) bool {
 		return false
 	}
 
-	//取出leader中所有的msg发送给peer
-	for i := r.Prs[to].Match; i < uint64(len(r.RaftLog.entries)); i++ {
-		entries := make([]*pb.Entry, 0)
-		for _, entry := range r.RaftLog.entries {
-			entries = append(entries, &entry)
-		}
-
-		msg := pb.Message{
-			MsgType: pb.MessageType_MsgAppend,
-			To:      to,
-			From:    r.id,
-			Term:    r.Term,
-			LogTerm: r.RaftLog.entries[i].Term,
-			Index:   i,
-			Entries: entries,
-			Commit:  r.RaftLog.committed,
-		}
-
-		r.msgs = append(r.msgs, msg)
+	//起始是leader的Prs里面存储的当前peer的下一条日志的位置
+	entries := make([]*pb.Entry, 0)
+	for i := r.Prs[to].Next; i < uint64(len(r.RaftLog.entries)); i++ {
+		entries = append(entries, &r.RaftLog.entries[i])
 	}
 
+	msg := pb.Message{
+		MsgType: pb.MessageType_MsgAppend,
+		To:      to,
+		From:    r.id,
+		Term:    r.Term,
+		LogTerm: r.RaftLog.entries[r.Prs[to].Match].Term,
+		Index:   r.RaftLog.entries[r.Prs[to].Match].Index,
+		Entries: entries,
+		Commit:  r.RaftLog.committed,
+	}
+
+	r.msgs = append(r.msgs, msg)
 	return true
 }
 
@@ -328,6 +325,7 @@ func (r *Raft) becomeLeader() {
 	//变更状态
 	r.State = StateLeader
 
+	//设置nextInts和matchInts
 	for _, peer := range r.peers {
 		r.Prs[peer] = &Progress{Match: 0}
 		if len(r.msgs) == 0 {
@@ -337,8 +335,17 @@ func (r *Raft) becomeLeader() {
 		}
 	}
 
-	//发送一条消息 截断之前的消息 leader只能处理自己任期的消息
-	r.sendAppend(r.id)
+	//发送一条空的ents消息 截断之前的消息 leader只能处理自己任期的消息
+	//todo
+	entry := pb.Entry{
+		EntryType: pb.EntryType_EntryNormal,
+		Term:      r.Term,
+		Index:     uint64(len(r.RaftLog.entries)) + 1,
+		Data:      nil,
+	}
+
+	r.RaftLog.entries = append(r.RaftLog.entries, entry)
+
 }
 
 // Step the entrance of handle message, see `MessageType`
@@ -436,7 +443,8 @@ func (r *Raft) Step(m pb.Message) error {
 					Data:  e.Data,
 				}
 				r.RaftLog.entries = append(r.RaftLog.entries, entry)
-				r.Prs[r.id].Match = uint64(len(r.RaftLog.entries))
+				r.Prs[r.id].Match = uint64(len(r.RaftLog.entries) - 1)
+				r.Prs[r.id].Next = uint64(len(r.RaftLog.entries))
 				if len(r.peers) == 1 {
 					r.RaftLog.committed++
 				}
@@ -455,7 +463,6 @@ func (r *Raft) Step(m pb.Message) error {
 		if m.MsgType == pb.MessageType_MsgAppendResponse {
 
 			if m.Reject == false {
-				//todo
 				r.Prs[m.From].Match = m.Index
 			}
 			//收到响应后更新commited
@@ -471,6 +478,7 @@ func (r *Raft) Step(m pb.Message) error {
 			})
 
 			r.RaftLog.committed = matchInts[len(matchInts)/2]
+
 		}
 
 	}

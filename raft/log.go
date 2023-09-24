@@ -14,7 +14,9 @@
 
 package raft
 
-import pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+import (
+	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+)
 
 // RaftLog manage the log entries, its struct look like:
 //
@@ -64,12 +66,19 @@ type RaftLog struct {
 // to the state that it just commits and applies the latest snapshot.
 func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
+	//从storage中取出消息
+	state, _, _ := storage.InitialState()
+	firstIndex, _ := storage.FirstIndex()
+	lastIndex, _ := storage.LastIndex()
+	entries, _ := storage.Entries(firstIndex, lastIndex+1)
+
 	raftLog := &RaftLog{
 		storage:   storage,
-		committed: 0,
-		applied:   0,
-		stabled:   0,
-		entries:   make([]pb.Entry, 0),
+		committed: state.Commit,
+		//todo
+		applied: lastIndex,
+		stabled: lastIndex,
+		entries: entries,
 	}
 
 	return raftLog
@@ -99,7 +108,11 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 // nextEnts returns all the committed but not applied entries
 func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
-	return l.entries[l.committed:l.applied]
+	//todo
+	firstIndex, _ := l.storage.FirstIndex()
+	entries, _ := l.storage.Entries(firstIndex, l.LastIndex()-1)
+	entries = append(entries, l.entries[l.applied:l.committed-1]...)
+	return entries
 }
 
 // LastIndex return the last index of the log entries
