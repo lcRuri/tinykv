@@ -75,8 +75,8 @@ func newLog(storage Storage) *RaftLog {
 	raftLog := &RaftLog{
 		storage:   storage,
 		committed: state.Commit,
-		//todo
-		applied: lastIndex,
+		// todo why applied = firstIndex - 1
+		applied: firstIndex - 1,
 		stabled: lastIndex,
 		entries: entries,
 	}
@@ -109,10 +109,7 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
 	//todo
-	firstIndex, _ := l.storage.FirstIndex()
-	entries, _ := l.storage.Entries(firstIndex, l.LastIndex()-1)
-	entries = append(entries, l.entries[l.applied:l.committed-1]...)
-	return entries
+	return l.entries[l.applied : l.committed-1]
 }
 
 // LastIndex return the last index of the log entries
