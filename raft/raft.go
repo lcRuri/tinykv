@@ -200,24 +200,27 @@ func (r *Raft) sendAppend(to uint64) bool {
 		return false
 	}
 
-	//起始是leader的Prs里面存储的当前peer的下一条日志的位置
-	entries := make([]*pb.Entry, 0)
-	for i := r.Prs[to].Next; i < uint64(len(r.RaftLog.entries)); i++ {
-		entries = append(entries, &r.RaftLog.entries[i])
+	if r.Prs[to].Match < uint64(len(r.RaftLog.entries)) {
+		//起始是leader的Prs里面存储的当前peer的下一条日志的位置
+		entries := make([]*pb.Entry, 0)
+		for i := r.Prs[to].Next; i < uint64(len(r.RaftLog.entries)); i++ {
+			entries = append(entries, &r.RaftLog.entries[i])
+		}
+
+		msg := pb.Message{
+			MsgType: pb.MessageType_MsgAppend,
+			To:      to,
+			From:    r.id,
+			Term:    r.Term,
+			LogTerm: r.RaftLog.entries[r.Prs[to].Match].Term,
+			Index:   r.RaftLog.entries[r.Prs[to].Match].Index,
+			Entries: entries,
+			Commit:  r.RaftLog.committed,
+		}
+
+		r.msgs = append(r.msgs, msg)
 	}
 
-	msg := pb.Message{
-		MsgType: pb.MessageType_MsgAppend,
-		To:      to,
-		From:    r.id,
-		Term:    r.Term,
-		LogTerm: r.RaftLog.entries[r.Prs[to].Match].Term,
-		Index:   r.RaftLog.entries[r.Prs[to].Match].Index,
-		Entries: entries,
-		Commit:  r.RaftLog.committed,
-	}
-
-	r.msgs = append(r.msgs, msg)
 	return true
 }
 
@@ -336,15 +339,7 @@ func (r *Raft) becomeLeader() {
 	}
 
 	//发送一条空的ents消息 截断之前的消息 leader只能处理自己任期的消息
-	//todo
-	entry := pb.Entry{
-		EntryType: pb.EntryType_EntryNormal,
-		Term:      r.Term,
-		Index:     uint64(len(r.RaftLog.entries)) + 1,
-		Data:      nil,
-	}
-
-	r.RaftLog.entries = append(r.RaftLog.entries, entry)
+	r.Step(pb.Message{MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{}}})
 
 }
 
@@ -461,29 +456,56 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 
 		if m.MsgType == pb.MessageType_MsgAppendResponse {
-
-			if m.Reject == false {
-				r.Prs[m.From].Match = m.Index
-			}
-			//收到响应后更新commited
-			matchInts := make([]uint64, 0)
-			for _, progress := range r.Prs {
-
-				matchInts = append(matchInts, progress.Match)
-			}
-
-			//排序为了找到中位数
-			sort.SliceIsSorted(matchInts, func(i, j int) bool {
-				return matchInts[i] < matchInts[j]
-			})
-
-			r.RaftLog.committed = matchInts[len(matchInts)/2]
-
+			r.handleAppendEntriesResponse(m)
 		}
 
 	}
 
 	return nil
+}
+
+func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
+	//todo
+	if m.Term > r.Term {
+		r.State = StateFollower
+	} else if m.Reject == true {
+		r.Prs[m.From].Match--
+		r.Prs[m.From].Next--
+	} else if m.Reject == false {
+		if m.LogTerm == 0 {
+			r.Prs[m.From].Match = m.Index - 1
+			r.Prs[m.From].Next = m.Index
+
+			//找到match的中位数更新commit
+			matchInts := make([]uint64, 0)
+			for _, progress := range r.Prs {
+				matchInts = append(matchInts, progress.Match)
+			}
+
+			sort.Slice(matchInts, func(i, j int) bool {
+				return matchInts[i] < matchInts[j]
+			})
+
+			r.RaftLog.committed = matchInts[len(matchInts)/2]
+
+		} else {
+			r.Prs[m.From].Match = m.Index
+			r.Prs[m.From].Next = r.Prs[m.From].Match + 1
+
+			//找到match的中位数更新commit
+			matchInts := make([]uint64, 0)
+			for _, progress := range r.Prs {
+				matchInts = append(matchInts, progress.Match)
+			}
+
+			sort.Slice(matchInts, func(i, j int) bool {
+				return matchInts[i] < matchInts[j]
+			})
+
+			r.RaftLog.committed = matchInts[len(matchInts)/2]
+		}
+
+	}
 }
 
 // handleAppendEntries handle AppendEntries RPC request
@@ -499,16 +521,26 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		r.Vote = m.From
 		r.Lead = m.From
 		r.electionElapsed = 0
+		msg := pb.Message{MsgType: pb.MessageType_MsgAppendResponse, From: r.id, To: m.From, Reject: false}
 
-		//todo 处理日志 raftlog.storage.ents
-		//r.RaftLog.entries = append(r.RaftLog.entries, m.Entries)
+		//当发送过来的消息的Index对应到RaftLog中的entry的term和消息的LogTerm不一样时
+		if r.RaftLog.entries[m.Index].Term != m.LogTerm {
+			//todo 找到冲突的那条日志的index 快速回退
+			msg.Reject = true
+		} else {
+			for _, entry := range m.Entries {
+				r.RaftLog.entries = append(r.RaftLog.entries, *entry)
+			}
 
-		for _, entry := range m.Entries {
-			r.RaftLog.entries = append(r.RaftLog.entries, *entry)
+			//leader的commit大于此节点的
+			if m.Commit > r.RaftLog.committed {
+				//更新applied和lastindex
+				r.RaftLog.applied = r.RaftLog.committed
+				r.RaftLog.stabled = r.RaftLog.LastIndex()
+			}
 		}
 
 		//返回响应
-		msg := pb.Message{MsgType: pb.MessageType_MsgAppendResponse, From: r.id, To: m.From, Reject: false}
 		r.msgs = append(r.msgs, msg)
 
 	} else {
