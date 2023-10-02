@@ -203,17 +203,23 @@ func (r *Raft) sendAppend(to uint64) bool {
 	if r.Prs[to].Match < uint64(len(r.RaftLog.entries)) {
 		//起始是leader的Prs里面存储的当前peer的下一条日志的位置
 		entries := make([]*pb.Entry, 0)
-		for i := r.Prs[to].Next; i < uint64(len(r.RaftLog.entries)); i++ {
+		//todo 关于leader截断日志导致follower的match和next的变化
+		for i := r.Prs[to].Next - 1; i < uint64(len(r.RaftLog.entries)); i++ {
 			entries = append(entries, &r.RaftLog.entries[i])
 		}
 
+		//todo
+		term, err := r.RaftLog.Term(r.Prs[to].Next - 1)
+		if err != nil {
+			return false
+		}
 		msg := pb.Message{
 			MsgType: pb.MessageType_MsgAppend,
 			To:      to,
 			From:    r.id,
 			Term:    r.Term,
-			LogTerm: r.RaftLog.entries[r.Prs[to].Match].Term,
-			Index:   r.RaftLog.entries[r.Prs[to].Match].Index,
+			LogTerm: term,
+			Index:   r.Prs[to].Next - 1,
 			Entries: entries,
 			Commit:  r.RaftLog.committed,
 		}
@@ -330,17 +336,15 @@ func (r *Raft) becomeLeader() {
 
 	//设置nextInts和matchInts
 	for _, peer := range r.peers {
-		r.Prs[peer] = &Progress{Match: 0}
-		if len(r.msgs) == 0 {
-			r.Prs[peer].Match = 0
-		} else {
-			r.Prs[peer].Next = r.msgs[len(r.msgs)-1].Index
+		p := &Progress{
+			Match: 0,
+			Next:  uint64(len(r.RaftLog.entries)) + 1,
 		}
+		r.Prs[peer] = p
 	}
 
 	//发送一条空的ents消息 截断之前的消息 leader只能处理自己任期的消息
-	r.Step(pb.Message{MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{}}})
-
+	r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Term: r.Term, Index: uint64(len(r.RaftLog.entries) + 1)})
 }
 
 // Step the entrance of handle message, see `MessageType`
@@ -437,6 +441,7 @@ func (r *Raft) Step(m pb.Message) error {
 					Index: r.RaftLog.LastIndex() + 1,
 					Data:  e.Data,
 				}
+
 				r.RaftLog.entries = append(r.RaftLog.entries, entry)
 				r.Prs[r.id].Match = uint64(len(r.RaftLog.entries) - 1)
 				r.Prs[r.id].Next = uint64(len(r.RaftLog.entries))
@@ -473,8 +478,8 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 		r.Prs[m.From].Next--
 	} else if m.Reject == false {
 		if m.LogTerm == 0 {
-			r.Prs[m.From].Match = m.Index - 1
-			r.Prs[m.From].Next = m.Index
+			r.Prs[m.From].Match = m.Index
+			r.Prs[m.From].Next = m.Index + 1
 
 			//找到match的中位数更新commit
 			matchInts := make([]uint64, 0)
@@ -487,7 +492,6 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 			})
 
 			r.RaftLog.committed = matchInts[len(matchInts)/2]
-
 		} else {
 			r.Prs[m.From].Match = m.Index
 			r.Prs[m.From].Next = r.Prs[m.From].Match + 1
