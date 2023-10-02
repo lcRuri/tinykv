@@ -108,8 +108,7 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 // nextEnts returns all the committed but not applied entries
 func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
-	//todo
-	return l.entries[l.applied : l.committed-1]
+	return l.entries[l.applied:l.committed]
 }
 
 // LastIndex return the last index of the log entries
