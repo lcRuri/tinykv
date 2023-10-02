@@ -528,7 +528,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		msg := pb.Message{MsgType: pb.MessageType_MsgAppendResponse, From: r.id, To: m.From, Reject: false}
 
 		//当发送过来的消息的Index对应到RaftLog中的entry的term和消息的LogTerm不一样时
-		if r.RaftLog.entries[m.Index].Term != m.LogTerm {
+		if len(r.RaftLog.entries) > 0 && r.RaftLog.entries[m.Index].Term != m.LogTerm {
 			//todo 找到冲突的那条日志的index 快速回退
 			msg.Reject = true
 		} else {
