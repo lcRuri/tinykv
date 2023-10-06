@@ -539,9 +539,25 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 				// todo 找到冲突的那条日志的index 快速回退
 				msg.Reject = true
 			} else {
-				r.RaftLog.entries = r.RaftLog.entries[:m.Index]
-				for _, entry := range m.Entries {
-					r.RaftLog.entries = append(r.RaftLog.entries, *entry)
+				//todo
+				if m.Index == 0 {
+					//日志存在
+					if len(r.RaftLog.entries) > 0 {
+						if r.RaftLog.entries[m.Index].Term != m.Entries[m.Index].Term {
+							r.RaftLog.entries = r.RaftLog.entries[:m.Index]
+							r.RaftLog.stabled = m.Index
+							for _, entry := range m.Entries {
+								r.RaftLog.entries = append(r.RaftLog.entries, *entry)
+							}
+						}
+					} else {
+						r.RaftLog.entries = r.RaftLog.entries[:m.Index]
+						r.RaftLog.stabled = m.Index
+						//todo 为什么这边添加到entries里面的日志会出现在storage中？和stablied有关？？
+						for _, entry := range m.Entries {
+							r.RaftLog.entries = append(r.RaftLog.entries, *entry)
+						}
+					}
 				}
 
 				//leader的commit大于此节点的
