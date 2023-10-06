@@ -539,6 +539,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 				// todo 找到冲突的那条日志的index 快速回退
 				msg.Reject = true
 			} else {
+				r.RaftLog.entries = r.RaftLog.entries[:m.Index]
 				for _, entry := range m.Entries {
 					r.RaftLog.entries = append(r.RaftLog.entries, *entry)
 				}
