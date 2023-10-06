@@ -345,6 +345,11 @@ func (r *Raft) becomeLeader() {
 
 	//发送一条空的ents消息 截断之前的消息 leader只能处理自己任期的消息
 	r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Term: r.Term, Index: uint64(len(r.RaftLog.entries) + 1)})
+	if len(r.peers) == 1 {
+		r.RaftLog.committed++
+	}
+	r.Prs[r.id].Match = uint64(len(r.RaftLog.entries))
+	r.Prs[r.id].Next = uint64(len(r.RaftLog.entries)) + 1
 }
 
 // Step the entrance of handle message, see `MessageType`
@@ -443,8 +448,8 @@ func (r *Raft) Step(m pb.Message) error {
 				}
 
 				r.RaftLog.entries = append(r.RaftLog.entries, entry)
-				r.Prs[r.id].Match = uint64(len(r.RaftLog.entries) - 1)
-				r.Prs[r.id].Next = uint64(len(r.RaftLog.entries))
+				r.Prs[r.id].Match = uint64(len(r.RaftLog.entries))
+				r.Prs[r.id].Next = uint64(len(r.RaftLog.entries)) + 1
 				if len(r.peers) == 1 {
 					r.RaftLog.committed++
 				}
@@ -470,7 +475,7 @@ func (r *Raft) Step(m pb.Message) error {
 }
 
 func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
-	//todo
+	// todo
 	if m.Term > r.Term {
 		r.State = StateFollower
 	} else if m.Reject == true {
