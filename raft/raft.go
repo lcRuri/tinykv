@@ -524,7 +524,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	//处理请求添加日志消息
 	//todo m.Term == r.Term && r.State != StateFollower 为什么这个条件也同意
 	//If AppendEntries RPC received from new leader: convert to follower
-	if m.Term > r.Term || (m.Term == r.Term && r.State != StateFollower) {
+	if m.Term >= r.Term {
 		r.becomeFollower(m.Term, m.From)
 		r.Term = m.Term
 		r.Vote = m.From
@@ -543,9 +543,8 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 
 			//leader的commit大于此节点的
 			if m.Commit > r.RaftLog.committed {
-				//更新applied和lastindex
-				r.RaftLog.applied = r.RaftLog.committed
-				r.RaftLog.stabled = r.RaftLog.LastIndex()
+				//todo 更新applied和lastindex
+				r.RaftLog.committed = min(m.Commit, r.RaftLog.LastIndex())
 			}
 		}
 
