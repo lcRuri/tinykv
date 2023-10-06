@@ -515,11 +515,13 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 }
 
 // handleAppendEntries handle AppendEntries RPC request
-// handleAppendEntries处理添加日志的RPC请求
+// handleAppendEntries处理添加日志的RPC请求 todo
 func (r *Raft) handleAppendEntries(m pb.Message) {
 	// Your Code Here (2A).
 	//处理请求添加日志消息
 	//If AppendEntries RPC received from new leader: convert to follower
+
+	//日志任期大于节点的本地日志
 	if m.Term >= r.Term {
 		r.becomeFollower(m.Term, m.From)
 		r.Term = m.Term
@@ -528,26 +530,29 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		r.electionElapsed = 0
 		msg := pb.Message{MsgType: pb.MessageType_MsgAppendResponse, From: r.id, To: m.From, Reject: false, Term: r.Term}
 
-		//todo 当发送过来的消息的Index对应到RaftLog中的entry的term和消息的LogTerm不一样时
-		if len(r.RaftLog.entries) > 0 && m.Index != 0 && m.Index-1 < uint64(len(r.RaftLog.entries)) && r.RaftLog.entries[m.Index-1].Term != m.LogTerm {
-			// todo 找到冲突的那条日志的index 快速回退
-			msg.Reject = true
-		} else if m.Index-1 >= uint64(len(r.RaftLog.entries)) && m.Index != 0 {
+		//先判断日志index是否在log的范围内
+		//如果index都不在范围内 不允许添加日志
+		if m.Index < 0 {
 			msg.Reject = true
 		} else {
-			for _, entry := range m.Entries {
-				r.RaftLog.entries = append(r.RaftLog.entries, *entry)
+			if (m.Index != 0 && m.Index-1 >= uint64(len(r.RaftLog.entries))) || (m.Index != 0 && r.RaftLog.entries[m.Index-1].Term != m.LogTerm) {
+				// todo 找到冲突的那条日志的index 快速回退
+				msg.Reject = true
+			} else {
+				for _, entry := range m.Entries {
+					r.RaftLog.entries = append(r.RaftLog.entries, *entry)
+				}
+
+				//leader的commit大于此节点的
+				if m.Commit > r.RaftLog.committed {
+					//todo 更新applied和lastindex
+					r.RaftLog.committed = min(m.Commit, r.RaftLog.LastIndex())
+				}
 			}
 
-			//leader的commit大于此节点的
-			if m.Commit > r.RaftLog.committed {
-				//todo 更新applied和lastindex
-				r.RaftLog.committed = min(m.Commit, r.RaftLog.LastIndex())
-			}
+			//返回响应
+			r.msgs = append(r.msgs, msg)
 		}
-
-		//返回响应
-		r.msgs = append(r.msgs, msg)
 
 	} else {
 		msg := pb.Message{MsgType: pb.MessageType_MsgAppendResponse, From: r.id, To: m.From, Reject: true}
