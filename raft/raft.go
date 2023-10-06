@@ -203,12 +203,10 @@ func (r *Raft) sendAppend(to uint64) bool {
 	if r.Prs[to].Match < uint64(len(r.RaftLog.entries)) {
 		//起始是leader的Prs里面存储的当前peer的下一条日志的位置
 		entries := make([]*pb.Entry, 0)
-		//todo 关于leader截断日志导致follower的match和next的变化
 		for i := r.Prs[to].Next - 1; i < uint64(len(r.RaftLog.entries)); i++ {
 			entries = append(entries, &r.RaftLog.entries[i])
 		}
 
-		//todo
 		term, err := r.RaftLog.Term(r.Prs[to].Next - 1)
 		if err != nil {
 			return false
@@ -475,7 +473,6 @@ func (r *Raft) Step(m pb.Message) error {
 }
 
 func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
-	// todo
 	if m.Term > r.Term {
 		r.State = StateFollower
 	} else if m.Reject == true {
@@ -522,7 +519,6 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 func (r *Raft) handleAppendEntries(m pb.Message) {
 	// Your Code Here (2A).
 	//处理请求添加日志消息
-	//todo m.Term == r.Term && r.State != StateFollower 为什么这个条件也同意
 	//If AppendEntries RPC received from new leader: convert to follower
 	if m.Term >= r.Term {
 		r.becomeFollower(m.Term, m.From)
@@ -530,11 +526,13 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		r.Vote = m.From
 		r.Lead = m.From
 		r.electionElapsed = 0
-		msg := pb.Message{MsgType: pb.MessageType_MsgAppendResponse, From: r.id, To: m.From, Reject: false}
+		msg := pb.Message{MsgType: pb.MessageType_MsgAppendResponse, From: r.id, To: m.From, Reject: false, Term: r.Term}
 
-		//当发送过来的消息的Index对应到RaftLog中的entry的term和消息的LogTerm不一样时
-		if len(r.RaftLog.entries) > 0 && r.RaftLog.entries[m.Index].Term != m.LogTerm {
-			//todo 找到冲突的那条日志的index 快速回退
+		//todo 当发送过来的消息的Index对应到RaftLog中的entry的term和消息的LogTerm不一样时
+		if len(r.RaftLog.entries) > 0 && m.Index != 0 && m.Index-1 < uint64(len(r.RaftLog.entries)) && r.RaftLog.entries[m.Index-1].Term != m.LogTerm {
+			// todo 找到冲突的那条日志的index 快速回退
+			msg.Reject = true
+		} else if m.Index-1 >= uint64(len(r.RaftLog.entries)) && m.Index != 0 {
 			msg.Reject = true
 		} else {
 			for _, entry := range m.Entries {
