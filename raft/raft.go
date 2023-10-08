@@ -534,15 +534,18 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		//如果index都不在范围内 不允许添加日志
 		if m.Index < 0 {
 			msg.Reject = true
-		} else {
+		} else { //todo
+			//如果msg携带的index不在raftLog的范围内或者在范围内但是任期不匹配 不允许添加
 			if (m.Index != 0 && m.Index-1 >= uint64(len(r.RaftLog.entries))) || (m.Index != 0 && r.RaftLog.entries[m.Index-1].Term != m.LogTerm) {
 				// todo 找到冲突的那条日志的index 快速回退
 				msg.Reject = true
 			} else {
-				//todo
+				//index为0 有两种情况
+				//第一种是
 				if m.Index == 0 {
-					//日志存在
+					//原来已经存在日志
 					if len(r.RaftLog.entries) > 0 {
+						//日志冲突 todo
 						if r.RaftLog.entries[m.Index].Term != m.Entries[m.Index].Term {
 							r.RaftLog.entries = r.RaftLog.entries[:m.Index]
 							r.RaftLog.stabled = m.Index
@@ -550,14 +553,24 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 								r.RaftLog.entries = append(r.RaftLog.entries, *entry)
 							}
 						}
-					} else {
+
+					}
+				} else {
+					//index不为0 并且日志冲突 则截断添加
+					if r.RaftLog.entries[m.Index-1].Term != m.LogTerm {
 						r.RaftLog.entries = r.RaftLog.entries[:m.Index]
 						r.RaftLog.stabled = m.Index
-						//todo 为什么这边添加到entries里面的日志会出现在storage中？和stablied有关？？
+						for _, entry := range m.Entries {
+							r.RaftLog.entries = append(r.RaftLog.entries, *entry)
+						}
+					} else { //日志不冲突 则直接添加
+						r.RaftLog.entries = r.RaftLog.entries[:m.Index]
+						r.RaftLog.stabled = m.Index
 						for _, entry := range m.Entries {
 							r.RaftLog.entries = append(r.RaftLog.entries, *entry)
 						}
 					}
+
 				}
 
 				//leader的commit大于此节点的
