@@ -17,6 +17,7 @@ package raft
 import (
 	"errors"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+	"github.com/pingcap/log"
 	"math/rand"
 	"sort"
 	"sync"
@@ -520,6 +521,55 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	// Your Code Here (2A).
 	//处理请求添加日志消息
 	//If AppendEntries RPC received from new leader: convert to follower
+	msg := pb.Message{MsgType: pb.MessageType_MsgAppendResponse, From: r.id, To: m.From, Index: m.Index, Term: r.Term}
+	term, err := r.RaftLog.Term(m.Index)
+	if err != nil {
+		log.Error("the logTerm not match index\n")
+		msg.Reject = true
+		r.msgs = append(r.msgs, msg)
+		return
+	}
+	//日志任期大于节点的本地日志并且前面的日志的term能够匹配
+	if m.Term >= r.Term && term == m.LogTerm {
+		//查找具体是在哪个位置匹配的
+		var PreIndex uint64
+		for _, entry := range m.Entries {
+			PreTerm, err := r.RaftLog.Term(entry.Index)
+			if err != nil {
+				log.Error("the logTerm not match index\n")
+			}
+			if PreTerm != entry.Term {
+				PreIndex = entry.Index
+				break
+			}
+		}
+
+		//判断PreIndex的情况
+		switch {
+		//不存在冲突
+		case PreIndex == 0:
+		//冲突的位置在已经提交的范围内 说明想要添加的日志有错 返回
+		case PreIndex <= r.RaftLog.committed:
+			msg.Reject = true
+		//在冲突的位置截断之前的日志
+		default:
+			r.RaftLog.entries = r.RaftLog.entries[:m.Index]
+			for _, entry := range m.Entries {
+				r.RaftLog.entries = append(r.RaftLog.entries, *entry)
+			}
+		}
+
+		//更新commited
+		if m.Commit > r.RaftLog.committed {
+			// commitIndex = min(leaderCommit, index of last new entry)
+			lastnewi := uint64(int(m.Index) + len(m.Entries)) //index of last new entry
+			r.RaftLog.committed = min(lastnewi, m.Commit)
+		}
+	} else {
+		msg.Reject = true
+	}
+
+	r.msgs = append(r.msgs, msg)
 
 }
 
