@@ -102,6 +102,9 @@ func (l *RaftLog) allEntries() []pb.Entry {
 // unstableEntries return all the unstable entries
 func (l *RaftLog) unstableEntries() []pb.Entry {
 	// Your Code Here (2A).
+	if l.stabled >= uint64(len(l.entries)) {
+		return []pb.Entry{}
+	}
 	return l.entries[l.stabled:]
 }
 
@@ -119,8 +122,24 @@ func (l *RaftLog) LastIndex() uint64 {
 }
 
 // Term return the term of the entry in the given index
+// 获取给定index的term
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
-	term := l.entries[i].Term
+	// 判断index的范围
+	firstIndex, err := l.storage.FirstIndex()
+	lastIndex, err := l.storage.LastIndex()
+	if err != nil {
+		return 0, err
+	}
+
+	if i < firstIndex-1 || i > lastIndex {
+		return 0, err
+	}
+
+	term, err := l.storage.Term(i)
+	if err != nil {
+		return 0, err
+	}
+
 	return term, nil
 }
