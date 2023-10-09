@@ -551,9 +551,11 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		//冲突的位置在已经提交的范围内 说明想要添加的日志有错 返回
 		case PreIndex <= r.RaftLog.committed:
 			msg.Reject = true
-		//在冲突的位置截断之前的日志
+		//在冲突的位置截断之前的日志 todo
 		default:
-			r.RaftLog.entries = r.RaftLog.entries[:m.Index]
+			r.RaftLog.entries = r.RaftLog.entries[:int(PreIndex-1)]
+			//why todo
+			r.RaftLog.stabled = PreIndex - 1
 			for _, entry := range m.Entries {
 				r.RaftLog.entries = append(r.RaftLog.entries, *entry)
 			}
