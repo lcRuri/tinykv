@@ -335,11 +335,11 @@ func (r *Raft) becomeLeader() {
 	r.State = StateLeader
 
 	//设置nextInts和matchInts
-	//todo
+	// todo
 	for _, peer := range r.peers {
 		p := &Progress{
 			Match: 0,
-			Next:  uint64(len(r.RaftLog.entries)) + 1,
+			Next:  r.RaftLog.stabled + 1,
 		}
 		r.Prs[peer] = p
 	}
