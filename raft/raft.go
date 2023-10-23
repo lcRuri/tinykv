@@ -201,6 +201,7 @@ func (r *Raft) sendAppend(to uint64) bool {
 		return false
 	}
 
+	// todo
 	if r.Prs[to].Match < uint64(len(r.RaftLog.entries)) {
 		//起始是leader的Prs里面存储的当前peer的下一条日志的位置
 		entries := make([]*pb.Entry, 0)
@@ -334,6 +335,7 @@ func (r *Raft) becomeLeader() {
 	r.State = StateLeader
 
 	//设置nextInts和matchInts
+	//todo
 	for _, peer := range r.peers {
 		p := &Progress{
 			Match: 0,
@@ -516,7 +518,7 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 }
 
 // handleAppendEntries handle AppendEntries RPC request
-// handleAppendEntries处理添加日志的RPC请求 todo
+// handleAppendEntries处理添加日志的RPC请求
 func (r *Raft) handleAppendEntries(m pb.Message) {
 	// Your Code Here (2A).
 	//处理请求添加日志消息
@@ -531,6 +533,10 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	}
 	//日志任期大于节点的本地日志并且前面的日志的term能够匹配
 	if m.Term >= r.Term && term == m.LogTerm {
+		r.Term = m.Term
+		r.Lead = m.From
+		r.State = StateFollower
+
 		//查找具体是在哪个位置匹配的
 		var PreIndex uint64
 		for _, entry := range m.Entries {
@@ -551,7 +557,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		//冲突的位置在已经提交的范围内 说明想要添加的日志有错 返回
 		case PreIndex <= r.RaftLog.committed:
 			msg.Reject = true
-		//在冲突的位置截断之前的日志 todo
+		//在冲突的位置截断之前的日志
 		default:
 			r.RaftLog.entries = r.RaftLog.entries[:int(PreIndex-1)]
 			//why todo
