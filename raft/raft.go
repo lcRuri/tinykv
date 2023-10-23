@@ -201,7 +201,6 @@ func (r *Raft) sendAppend(to uint64) bool {
 		return false
 	}
 
-	// todo
 	if r.Prs[to].Match < uint64(len(r.RaftLog.entries)) {
 		//起始是leader的Prs里面存储的当前peer的下一条日志的位置
 		entries := make([]*pb.Entry, 0)
@@ -235,10 +234,13 @@ func (r *Raft) sendAppend(to uint64) bool {
 func (r *Raft) sendHeartbeat(to uint64) {
 	// Your Code Here (2A).
 
+	//todo
 	msg := pb.Message{
-		To:   to,
-		From: r.id,
-		Term: r.Term,
+		To:      to,
+		From:    r.id,
+		Term:    r.Term,
+		Index:   r.RaftLog.entries[r.RaftLog.LastIndex()-1].Index,
+		LogTerm: r.RaftLog.entries[r.RaftLog.LastIndex()-1].Term,
 	}
 
 	//根据角色的不同设置msg的type
