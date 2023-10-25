@@ -227,6 +227,10 @@ func (r *Raft) sendAppend(to uint64) bool {
 			Commit:  r.RaftLog.committed,
 		}
 
+		if term == 0 {
+			msg.LogTerm = r.Term
+		}
+
 		r.msgs = append(r.msgs, msg)
 	}
 
@@ -350,7 +354,7 @@ func (r *Raft) becomeLeader() {
 
 	//发送一条空的ents消息 截断之前的消息 leader只能处理自己任期的消息
 	r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{})
-	r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Term: r.Term, Index: uint64(len(r.RaftLog.entries) + 1)})
+	//r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Term: r.Term, Index: uint64(len(r.RaftLog.entries))})
 	if len(r.peers) == 1 {
 		r.RaftLog.committed++
 	}
