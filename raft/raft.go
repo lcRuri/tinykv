@@ -353,7 +353,7 @@ func (r *Raft) becomeLeader() {
 	}
 
 	//发送一条空的ents消息 截断之前的消息 leader只能处理自己任期的消息
-	r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Index: r.RaftLog.LastIndex() + 1})
+	r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Term: r.Term, Index: r.RaftLog.LastIndex() + 1})
 	if len(r.peers) == 1 {
 		r.RaftLog.committed++
 	}
