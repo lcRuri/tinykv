@@ -242,11 +242,13 @@ func (r *Raft) sendAppend(to uint64) bool {
 func (r *Raft) sendHeartbeat(to uint64) {
 	// Your Code Here (2A).
 
-	//todo
+	//todo 关于含有日志的候选者要成为leader 关于LogTerm和Index设置
 	msg := pb.Message{
 		To:   to,
 		From: r.id,
 		Term: r.Term,
+		//LogTerm: r.RaftLog.entries[r.Prs[to].Match].Term,
+		//Index:   r.RaftLog.entries[r.Prs[to].Match].Index,
 	}
 
 	//根据角色的不同设置msg的type
@@ -343,7 +345,7 @@ func (r *Raft) becomeLeader() {
 	r.State = StateLeader
 
 	//设置nextInts和matchInts
-	// todo
+	// todo match是entries的下标 next为啥这么设置
 	for _, peer := range r.peers {
 		p := &Progress{
 			Match: 0,
@@ -491,7 +493,6 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 		r.Prs[m.From].Next--
 	} else if m.Reject == false {
 		//todo
-
 		r.Prs[m.From].Match = m.Index
 		r.Prs[m.From].Next = m.Index + 1
 
