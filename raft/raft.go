@@ -239,8 +239,8 @@ func (r *Raft) sendHeartbeat(to uint64) {
 		To:      to,
 		From:    r.id,
 		Term:    r.Term,
-		Index:   r.RaftLog.entries[r.RaftLog.LastIndex()-1].Index,
-		LogTerm: r.RaftLog.entries[r.RaftLog.LastIndex()-1].Term,
+		Index:   r.RaftLog.entries[r.Prs[to].Match].Index,
+		LogTerm: r.RaftLog.entries[r.Prs[to].Match].Term,
 	}
 
 	//根据角色的不同设置msg的type
@@ -347,6 +347,7 @@ func (r *Raft) becomeLeader() {
 	}
 
 	//发送一条空的ents消息 截断之前的消息 leader只能处理自己任期的消息
+	r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{})
 	r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Term: r.Term, Index: uint64(len(r.RaftLog.entries) + 1)})
 	if len(r.peers) == 1 {
 		r.RaftLog.committed++
@@ -484,37 +485,27 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 		r.Prs[m.From].Match--
 		r.Prs[m.From].Next--
 	} else if m.Reject == false {
-		if m.LogTerm == 0 {
-			r.Prs[m.From].Match = m.Index
-			r.Prs[m.From].Next = m.Index + 1
+		//todo
 
-			//找到match的中位数更新commit
-			matchInts := make([]uint64, 0)
-			for _, progress := range r.Prs {
+		r.Prs[m.From].Match = m.Index
+		r.Prs[m.From].Next = m.Index + 1
+
+		//找到match的中位数更新commit
+		matchInts := make([]uint64, 0)
+		for id, progress := range r.Prs {
+			if id == r.id {
+				continue
+			} else {
 				matchInts = append(matchInts, progress.Match)
+
 			}
-
-			sort.Slice(matchInts, func(i, j int) bool {
-				return matchInts[i] < matchInts[j]
-			})
-
-			r.RaftLog.committed = matchInts[len(matchInts)/2]
-		} else {
-			r.Prs[m.From].Match = m.Index
-			r.Prs[m.From].Next = r.Prs[m.From].Match + 1
-
-			//找到match的中位数更新commit
-			matchInts := make([]uint64, 0)
-			for _, progress := range r.Prs {
-				matchInts = append(matchInts, progress.Match)
-			}
-
-			sort.Slice(matchInts, func(i, j int) bool {
-				return matchInts[i] < matchInts[j]
-			})
-
-			r.RaftLog.committed = matchInts[len(matchInts)/2]
 		}
+
+		sort.Slice(matchInts, func(i, j int) bool {
+			return matchInts[i] < matchInts[j]
+		})
+
+		r.RaftLog.committed = matchInts[len(matchInts)/2]
 
 	}
 }
