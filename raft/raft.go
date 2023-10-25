@@ -189,6 +189,10 @@ func newRaft(c *Config) *Raft {
 		Prs:     map[uint64]*Progress{},
 	}
 
+	for _, peer := range raft.peers {
+		raft.Prs[peer] = &Progress{Match: 0, Next: 1}
+	}
+
 	return raft
 }
 
@@ -236,11 +240,9 @@ func (r *Raft) sendHeartbeat(to uint64) {
 
 	//todo
 	msg := pb.Message{
-		To:      to,
-		From:    r.id,
-		Term:    r.Term,
-		Index:   r.RaftLog.entries[r.Prs[to].Match].Index,
-		LogTerm: r.RaftLog.entries[r.Prs[to].Match].Term,
+		To:   to,
+		From: r.id,
+		Term: r.Term,
 	}
 
 	//根据角色的不同设置msg的type
