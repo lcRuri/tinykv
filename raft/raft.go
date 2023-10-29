@@ -251,6 +251,11 @@ func (r *Raft) sendHeartbeat(to uint64) {
 		//Index:   r.RaftLog.entries[r.Prs[to].Match].Index,
 	}
 
+	if len(r.RaftLog.entries) != 0 {
+		msg.LogTerm = r.RaftLog.entries[len(r.RaftLog.entries)-1].Term
+		msg.Index = r.RaftLog.entries[len(r.RaftLog.entries)-1].Index
+	}
+
 	//根据角色的不同设置msg的type
 	if r.State == StateCandidate {
 		msg.MsgType = pb.MessageType_MsgRequestVote
@@ -384,7 +389,9 @@ func (r *Raft) Step(m pb.Message) error {
 				if peer == r.id {
 					continue
 				} else {
+					//todo 区别是否已经有了日志
 					r.sendHeartbeat(peer)
+
 				}
 			}
 		}
@@ -589,14 +596,27 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 	case pb.MessageType_MsgRequestVote:
 		//消息的任期大于节点本身
 		if m.Term > r.Term || r.Vote == m.From {
+			msg := pb.Message{}
 			r.becomeFollower(m.Term, m.From)
 			r.Term = m.Term
 			r.Vote = m.From
 			r.Lead = m.From
 			r.electionElapsed = 0
 
+			//判断日志
+			if len(r.RaftLog.entries) > 0 {
+				if m.LogTerm < r.RaftLog.entries[len(r.RaftLog.entries)-1].Term {
+					m.Reject = true
+				} else if m.LogTerm == r.RaftLog.entries[len(r.RaftLog.entries)-1].Term {
+					if m.Index < r.RaftLog.entries[len(r.RaftLog.entries)-1].Index {
+						m.Reject = true
+					}
+				}
+			}
+
 			//返回响应
-			msg := pb.Message{MsgType: pb.MessageType_MsgRequestVoteResponse, From: r.id, To: m.From, Term: m.Term, Reject: m.Reject}
+			msg = pb.Message{MsgType: pb.MessageType_MsgRequestVoteResponse, From: r.id, To: m.From, Term: m.Term, Reject: m.Reject}
+
 			r.msgs = append(r.msgs, msg)
 		}
 		//如果任期相同并且没有投过票或者已经为请求投票的透过票
