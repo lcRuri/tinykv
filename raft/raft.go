@@ -251,10 +251,11 @@ func (r *Raft) sendHeartbeat(to uint64) {
 		//Index:   r.RaftLog.entries[r.Prs[to].Match].Index,
 	}
 
-	if len(r.RaftLog.entries) != 0 {
-		msg.LogTerm = r.RaftLog.entries[len(r.RaftLog.entries)-1].Term
-		msg.Index = r.RaftLog.entries[len(r.RaftLog.entries)-1].Index
-	}
+	// TestLeaderBcastBeat2AA
+	//if len(r.RaftLog.entries) != 0 {
+	//	msg.LogTerm = r.RaftLog.entries[len(r.RaftLog.entries)-1].Term
+	//	msg.Index = r.RaftLog.entries[len(r.RaftLog.entries)-1].Index
+	//}
 
 	//根据角色的不同设置msg的type
 	if r.State == StateCandidate {
@@ -360,7 +361,8 @@ func (r *Raft) becomeLeader() {
 	}
 
 	//发送一条空的ents消息 截断之前的消息 leader只能处理自己任期的消息
-	r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Term: r.Term, Index: r.RaftLog.LastIndex() + 1})
+	//r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Term: r.Term, Index: r.RaftLog.LastIndex() + 1})
+	r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{})
 	if len(r.peers) == 1 {
 		r.RaftLog.committed++
 	}
@@ -461,7 +463,7 @@ func (r *Raft) Step(m pb.Message) error {
 			for _, e := range m.Entries {
 				entry := pb.Entry{
 					Term:  r.Term,
-					Index: r.RaftLog.LastIndex() + 1,
+					Index: r.RaftLog.LastIndex(),
 					Data:  e.Data,
 				}
 
@@ -499,10 +501,14 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 		r.Prs[m.From].Match--
 		r.Prs[m.From].Next--
 	} else if m.Reject == false {
-		//todo
+
 		r.Prs[m.From].Match = m.Index
 		r.Prs[m.From].Next = m.Index + 1
 
+		//todo 只能提交自己任期内的日志
+		if r.RaftLog.entries[m.Index-1].Term != r.Term {
+			return
+		}
 		//找到match的中位数更新commit
 		matchInts := make([]uint64, 0)
 		for id, progress := range r.Prs {
@@ -510,7 +516,6 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 				continue
 			} else {
 				matchInts = append(matchInts, progress.Match)
-
 			}
 		}
 
