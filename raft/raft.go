@@ -205,10 +205,10 @@ func (r *Raft) sendAppend(to uint64) bool {
 		return false
 	}
 
-	if r.Prs[to].Match < uint64(len(r.RaftLog.entries)) {
+	if r.Prs[to].Next < uint64(len(r.RaftLog.entries)) {
 		//起始是leader的Prs里面存储的当前peer的下一条日志的位置
 		entries := make([]*pb.Entry, 0)
-		for i := r.Prs[to].Next - 1; i < uint64(len(r.RaftLog.entries)); i++ {
+		for i := r.Prs[to].Next; i < uint64(len(r.RaftLog.entries)); i++ {
 			entries = append(entries, &r.RaftLog.entries[i])
 		}
 
@@ -463,7 +463,7 @@ func (r *Raft) Step(m pb.Message) error {
 			for _, e := range m.Entries {
 				entry := pb.Entry{
 					Term:  r.Term,
-					Index: r.RaftLog.LastIndex(),
+					Index: r.RaftLog.LastIndex() + 1,
 					Data:  e.Data,
 				}
 
@@ -506,9 +506,9 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 		r.Prs[m.From].Next = m.Index + 1
 
 		//todo 只能提交自己任期内的日志
-		if r.RaftLog.entries[m.Index-1].Term != r.Term {
-			return
-		}
+		//if r.RaftLog.entries[m.Index-1].Term != r.Term {
+		//	return
+		//}
 		//找到match的中位数更新commit
 		matchInts := make([]uint64, 0)
 		for id, progress := range r.Prs {
