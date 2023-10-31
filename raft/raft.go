@@ -205,30 +205,28 @@ func (r *Raft) sendAppend(to uint64) bool {
 		return false
 	}
 
-	if r.Prs[to].Next-1 < uint64(len(r.RaftLog.entries)) {
-		//起始是leader的Prs里面存储的当前peer的下一条日志的位置
-		entries := make([]*pb.Entry, 0)
-		for i := r.Prs[to].Match; i < uint64(len(r.RaftLog.entries)); i++ {
-			entries = append(entries, &r.RaftLog.entries[i])
-		}
-
-		term, err := r.RaftLog.Term(r.Prs[to].Next - 1)
-		if err != nil {
-			return false
-		}
-		msg := pb.Message{
-			MsgType: pb.MessageType_MsgAppend,
-			To:      to,
-			From:    r.id,
-			Term:    r.Term,
-			LogTerm: term,
-			Index:   r.Prs[to].Next - 1,
-			Entries: entries,
-			Commit:  r.RaftLog.committed,
-		}
-
-		r.msgs = append(r.msgs, msg)
+	//起始是leader的Prs里面存储的当前peer的下一条日志的位置
+	entries := make([]*pb.Entry, 0)
+	for i := r.Prs[to].Match; i < uint64(len(r.RaftLog.entries)); i++ {
+		entries = append(entries, &r.RaftLog.entries[i])
 	}
+
+	term, err := r.RaftLog.Term(r.Prs[to].Next - 1)
+	if err != nil {
+		return false
+	}
+	msg := pb.Message{
+		MsgType: pb.MessageType_MsgAppend,
+		To:      to,
+		From:    r.id,
+		Term:    r.Term,
+		LogTerm: term,
+		Index:   r.Prs[to].Next - 1,
+		Entries: entries,
+		Commit:  r.RaftLog.committed,
+	}
+
+	r.msgs = append(r.msgs, msg)
 
 	return true
 }
