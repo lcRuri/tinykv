@@ -205,10 +205,10 @@ func (r *Raft) sendAppend(to uint64) bool {
 		return false
 	}
 
-	if r.Prs[to].Next < uint64(len(r.RaftLog.entries)) {
+	if r.Prs[to].Next-1 < uint64(len(r.RaftLog.entries)) {
 		//起始是leader的Prs里面存储的当前peer的下一条日志的位置
 		entries := make([]*pb.Entry, 0)
-		for i := r.Prs[to].Next; i < uint64(len(r.RaftLog.entries)); i++ {
+		for i := r.Prs[to].Match; i < uint64(len(r.RaftLog.entries)); i++ {
 			entries = append(entries, &r.RaftLog.entries[i])
 		}
 
@@ -361,8 +361,8 @@ func (r *Raft) becomeLeader() {
 	}
 
 	//发送一条空的ents消息 截断之前的消息 leader只能处理自己任期的消息
-	//r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Term: r.Term, Index: r.RaftLog.LastIndex() + 1})
-	r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{})
+	r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Term: r.Term, Index: r.RaftLog.LastIndex() + 1})
+	//r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{})
 	if len(r.peers) == 1 {
 		r.RaftLog.committed++
 	}
