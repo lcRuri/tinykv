@@ -227,10 +227,6 @@ func (r *Raft) sendAppend(to uint64) bool {
 			Commit:  r.RaftLog.committed,
 		}
 
-		if term == 0 {
-			msg.LogTerm = r.Term
-		}
-
 		r.msgs = append(r.msgs, msg)
 	}
 
@@ -247,15 +243,45 @@ func (r *Raft) sendHeartbeat(to uint64) {
 		To:   to,
 		From: r.id,
 		Term: r.Term,
-		//LogTerm: r.RaftLog.entries[r.Prs[to].Match].Term,
-		//Index:   r.RaftLog.entries[r.Prs[to].Match].Index,
 	}
 
-	// TestLeaderBcastBeat2AA
-	//if len(r.RaftLog.entries) != 0 {
-	//	msg.LogTerm = r.RaftLog.entries[len(r.RaftLog.entries)-1].Term
-	//	msg.Index = r.RaftLog.entries[len(r.RaftLog.entries)-1].Index
-	//}
+	//lastIndex := r.RaftLog.LastIndex()
+	//lastTerm := r.RaftLog.entries[lastIndex-1].Term
+	//
+	//msg.Index = lastIndex
+	//msg.LogTerm = lastTerm
+
+	//根据角色的不同设置msg的type
+	if r.State == StateCandidate {
+		msg.MsgType = pb.MessageType_MsgRequestVote
+
+	}
+	if r.State == StateLeader {
+		msg.MsgType = pb.MessageType_MsgHeartbeat
+	}
+
+	//发送消息，只需将其推送到 raft.Raft.msgs
+	r.msgs = append(r.msgs, msg)
+}
+
+func (r *Raft) sendHeartbeatWithInfo(to uint64) {
+	// Your Code Here (2A).
+
+	//todo 关于含有日志的候选者要成为leader 关于LogTerm和Index设置
+	msg := pb.Message{
+		To:   to,
+		From: r.id,
+		Term: r.Term,
+	}
+
+	lastIndex := r.RaftLog.LastIndex()
+	lastTerm, err := r.RaftLog.Term(lastIndex)
+	if err != nil {
+		panic(err)
+	}
+
+	msg.Index = lastIndex
+	msg.LogTerm = lastTerm
 
 	//根据角色的不同设置msg的type
 	if r.State == StateCandidate {
@@ -277,6 +303,7 @@ func (r *Raft) tick() {
 	if len(r.peers) == 1 && r.State == StateFollower {
 		r.becomeCandidate()
 		r.becomeLeader()
+		r.bcastAppend()
 		return
 	}
 	random := rand.Intn(20)
@@ -370,6 +397,15 @@ func (r *Raft) becomeLeader() {
 	r.Prs[r.id].Next = uint64(len(r.RaftLog.entries)) + 1
 }
 
+func (r *Raft) bcastAppend() {
+	for id := range r.Prs {
+		if id == r.id {
+			continue
+		}
+		r.sendAppend(id)
+	}
+}
+
 // Step the entrance of handle message, see `MessageType`
 // on `eraftpb.proto` for what msgs should be handled
 // Raft 收到的所有消息将被传递到 raft.Raft.Step()
@@ -379,6 +415,7 @@ func (r *Raft) Step(m pb.Message) error {
 	if len(r.peers) == 1 && r.State == StateFollower {
 		r.becomeCandidate()
 		r.becomeLeader()
+		r.bcastAppend()
 		return nil
 	}
 
@@ -392,7 +429,7 @@ func (r *Raft) Step(m pb.Message) error {
 					continue
 				} else {
 					//todo 区别是否已经有了日志
-					r.sendHeartbeat(peer)
+					r.sendHeartbeatWithInfo(peer)
 
 				}
 			}
@@ -414,7 +451,7 @@ func (r *Raft) Step(m pb.Message) error {
 				if peer == r.id {
 					continue
 				} else {
-					r.sendHeartbeat(peer)
+					r.sendHeartbeatWithInfo(peer)
 				}
 			}
 		}
@@ -429,6 +466,7 @@ func (r *Raft) Step(m pb.Message) error {
 			r.votes[m.From] = true
 			if len(r.votes) > len(r.peers)/2 {
 				r.becomeLeader()
+				r.bcastAppend()
 			}
 		}
 
@@ -506,26 +544,38 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 		r.Prs[m.From].Next = m.Index + 1
 
 		//todo 只能提交自己任期内的日志
-		//if r.RaftLog.entries[m.Index-1].Term != r.Term {
-		//	return
-		//}
+
+		if m.Index >= 1 && r.RaftLog.entries[m.Index-1].Term != r.Term {
+			return
+		}
 		//找到match的中位数更新commit
 		matchInts := make([]uint64, 0)
-		for id, progress := range r.Prs {
-			if id == r.id {
-				continue
-			} else {
-				matchInts = append(matchInts, progress.Match)
-			}
+		for _, progress := range r.Prs {
+			matchInts = append(matchInts, progress.Match)
 		}
 
 		sort.Slice(matchInts, func(i, j int) bool {
 			return matchInts[i] < matchInts[j]
 		})
 
-		r.RaftLog.committed = matchInts[len(matchInts)/2]
+		if r.maybeCommit(matchInts[len(matchInts)/2]) {
+			r.bcastAppend()
+		}
 
 	}
+}
+
+func (r *Raft) maybeCommit(newCommited uint64) bool {
+	if newCommited > r.RaftLog.committed {
+		r.changeCommited(newCommited)
+		return true
+	}
+
+	return false
+}
+
+func (r *Raft) changeCommited(commited uint64) {
+	r.RaftLog.committed = commited
 }
 
 // handleAppendEntries handle AppendEntries RPC request
@@ -587,7 +637,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	} else {
 		msg.Reject = true
 	}
-
+	msg.Index = uint64(len(r.RaftLog.entries))
 	r.msgs = append(r.msgs, msg)
 
 }
@@ -610,7 +660,8 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 
 			//判断日志
 			if len(r.RaftLog.entries) > 0 {
-				if m.LogTerm < r.RaftLog.entries[len(r.RaftLog.entries)-1].Term {
+				//todo
+				if m.LogTerm < r.RaftLog.entries[len(r.RaftLog.entries)-1].Term && r.RaftLog.entries[len(r.RaftLog.entries)-1].Term >= m.Term {
 					m.Reject = true
 				} else if m.LogTerm == r.RaftLog.entries[len(r.RaftLog.entries)-1].Term {
 					if m.Index < r.RaftLog.entries[len(r.RaftLog.entries)-1].Index {
