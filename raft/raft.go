@@ -173,6 +173,10 @@ func newRaft(c *Config) *Raft {
 		panic(err.Error())
 	}
 	// Your Code Here (2A).
+	state, _, err := c.Storage.InitialState()
+	if err != nil {
+		panic(err)
+	}
 	raft := &Raft{
 		//2AA
 		id:               c.ID,
@@ -184,6 +188,8 @@ func newRaft(c *Config) *Raft {
 		heartbeatElapsed: 0,
 		peers:            c.peers,
 		votes:            map[uint64]bool{},
+		Vote:             state.Vote,
+		Term:             state.Term,
 		//2AB
 		RaftLog: newLog(c.Storage),
 		Prs:     map[uint64]*Progress{},
@@ -356,7 +362,6 @@ func (r *Raft) becomeCandidate() {
 	// Your Code Here (2A).
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
 	r.State = StateCandidate
 	r.Term += 1
 	//给自己投票
@@ -459,12 +464,16 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 
 		//收到响应
-		if m.MsgType == pb.MessageType_MsgRequestVoteResponse && m.Reject == false {
 
+		if m.MsgType == pb.MessageType_MsgRequestVoteResponse && m.Reject == false {
 			r.votes[m.From] = true
 			if len(r.votes) > len(r.peers)/2 {
 				r.becomeLeader()
 				r.bcastAppend()
+			}
+		} else if m.MsgType == pb.MessageType_MsgRequestVoteResponse {
+			if len(r.votes) <= len(r.peers)/2 {
+				r.becomeFollower(m.Term, None)
 			}
 		}
 
@@ -533,6 +542,7 @@ func (r *Raft) Step(m pb.Message) error {
 func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 	if m.Term > r.Term {
 		r.State = StateFollower
+		r.Term = m.Term
 	} else if m.Reject == true {
 		r.Prs[m.From].Match--
 		r.Prs[m.From].Next--
@@ -543,9 +553,6 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 
 		//todo 只能提交自己任期内的日志
 
-		if m.Index >= 1 && r.RaftLog.entries[m.Index-1].Term != r.Term {
-			return
-		}
 		//找到match的中位数更新commit
 		matchInts := make([]uint64, 0)
 		for _, progress := range r.Prs {
@@ -658,7 +665,6 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 
 			//判断日志
 			if len(r.RaftLog.entries) > 0 {
-				//todo
 				if m.LogTerm < r.RaftLog.entries[len(r.RaftLog.entries)-1].Term && r.RaftLog.entries[len(r.RaftLog.entries)-1].Term >= m.Term {
 					m.Reject = true
 				} else if m.LogTerm == r.RaftLog.entries[len(r.RaftLog.entries)-1].Term {
@@ -673,21 +679,8 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 
 			r.msgs = append(r.msgs, msg)
 		}
-		//如果任期相同并且没有投过票或者已经为请求投票的透过票
-		if m.Term == r.Term && r.Vote == 0 {
-			r.becomeFollower(m.Term, m.From)
-			r.Term = m.Term
-			r.Vote = m.From
-			r.Lead = m.From
-			r.electionElapsed = 0
-
-			//返回响应
-			msg := pb.Message{MsgType: pb.MessageType_MsgRequestVoteResponse, From: r.id, To: m.From, Term: m.Term, Reject: m.Reject}
-			r.msgs = append(r.msgs, msg)
-		}
-		//如果任期相同但是已经投过票并且还不是为请求投票投的票
-		if m.Term == r.Term && r.Vote != m.From {
-			msg := pb.Message{MsgType: pb.MessageType_MsgRequestVoteResponse, From: r.id, To: m.From, Term: m.Term, Reject: true}
+		if (m.Term == r.Term && r.Vote != m.From) || r.Term > m.Term {
+			msg := pb.Message{MsgType: pb.MessageType_MsgRequestVoteResponse, From: r.id, To: m.From, Term: r.Term, Reject: true}
 			r.msgs = append(r.msgs, msg)
 		}
 
@@ -697,6 +690,7 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 			r.becomeFollower(m.Term, m.From)
 			r.Term = m.Term
 			r.Lead = m.From
+			r.Vote = m.From
 			r.electionElapsed = 0
 		}
 	}
