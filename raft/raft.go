@@ -626,8 +626,11 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		//在冲突的位置截断之前的日志
 		default:
 			r.RaftLog.entries = r.RaftLog.entries[:int(PreIndex-1)]
-			//why todo
-			r.RaftLog.stabled = PreIndex - 1
+
+			//截断的位置影响了stabled 就需要更改stabled
+			if r.RaftLog.stabled > PreIndex-1 {
+				r.RaftLog.stabled = PreIndex - 1
+			}
 			for _, entry := range m.Entries {
 				r.RaftLog.entries = append(r.RaftLog.entries, *entry)
 			}
@@ -642,6 +645,8 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	} else {
 		msg.Reject = true
 	}
+
+	//todo 可能需要follower的commit
 	msg.Index = uint64(len(r.RaftLog.entries))
 	r.msgs = append(r.msgs, msg)
 
