@@ -605,13 +605,15 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 
 		//查找具体是在哪个位置匹配的
 		var PreIndex uint64
-		for _, entry := range m.Entries {
+		var entriesIndex int
+		for i, entry := range m.Entries {
 			PreTerm, err := r.RaftLog.Term(entry.Index)
 			if err != nil {
 				log.Error("the logTerm not match index\n")
 			}
 			if PreTerm != entry.Term {
 				PreIndex = entry.Index
+				entriesIndex = i
 				break
 			}
 		}
@@ -627,6 +629,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		default:
 			r.RaftLog.entries = r.RaftLog.entries[:int(PreIndex-1)]
 
+			m.Entries = m.Entries[entriesIndex:]
 			//截断的位置影响了stabled 就需要更改stabled
 			if r.RaftLog.stabled > PreIndex-1 {
 				r.RaftLog.stabled = PreIndex - 1
