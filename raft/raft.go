@@ -310,6 +310,8 @@ func (r *Raft) tick() {
 		r.bcastAppend()
 		return
 	}
+
+	//todo
 	random := rand.Intn(20)
 	// Your Code Here (2A).
 	switch r.State {
@@ -470,10 +472,6 @@ func (r *Raft) Step(m pb.Message) error {
 			if len(r.votes) > len(r.peers)/2 {
 				r.becomeLeader()
 				r.bcastAppend()
-			}
-		} else if m.MsgType == pb.MessageType_MsgRequestVoteResponse {
-			if len(r.votes) <= len(r.peers)/2 {
-				r.becomeFollower(m.Term, None)
 			}
 		}
 
@@ -663,7 +661,7 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 
 	case pb.MessageType_MsgRequestVote:
 		//消息的任期大于节点本身
-		if m.Term > r.Term || r.Vote == m.From {
+		if m.Term > r.Term || r.Vote == m.From || r.Vote == None {
 			msg := pb.Message{}
 			r.becomeFollower(m.Term, m.From)
 			r.Term = m.Term
