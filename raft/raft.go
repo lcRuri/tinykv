@@ -249,43 +249,13 @@ func (r *Raft) sendHeartbeat(to uint64) {
 		Term: r.Term,
 	}
 
-	//lastIndex := r.RaftLog.LastIndex()
-	//lastTerm := r.RaftLog.entries[lastIndex-1].Term
-	//
-	//msg.Index = lastIndex
-	//msg.LogTerm = lastTerm
-
-	//根据角色的不同设置msg的type
-	if r.State == StateCandidate {
-		msg.MsgType = pb.MessageType_MsgRequestVote
-
+	//获取peer的匹配日志
+	msg.Index = r.Prs[to].Match
+	if msg.Index == 0 {
+		msg.LogTerm = 0
+	} else {
+		msg.Term = r.RaftLog.entries[msg.Index-1].Term
 	}
-	if r.State == StateLeader {
-		msg.MsgType = pb.MessageType_MsgHeartbeat
-	}
-
-	//发送消息，只需将其推送到 raft.Raft.msgs
-	r.msgs = append(r.msgs, msg)
-}
-
-func (r *Raft) sendHeartbeatWithInfo(to uint64) {
-	// Your Code Here (2A).
-
-	//todo 关于含有日志的候选者要成为leader 关于LogTerm和Index设置
-	msg := pb.Message{
-		To:   to,
-		From: r.id,
-		Term: r.Term,
-	}
-
-	lastIndex := r.RaftLog.LastIndex()
-	lastTerm, err := r.RaftLog.Term(lastIndex)
-	if err != nil {
-		panic(err)
-	}
-
-	msg.Index = lastIndex
-	msg.LogTerm = lastTerm
 
 	//根据角色的不同设置msg的type
 	if r.State == StateCandidate {
@@ -434,7 +404,7 @@ func (r *Raft) Step(m pb.Message) error {
 					continue
 				} else {
 					//todo 区别是否已经有了日志
-					r.sendHeartbeatWithInfo(peer)
+					r.sendHeartbeat(peer)
 
 				}
 			}
@@ -456,7 +426,7 @@ func (r *Raft) Step(m pb.Message) error {
 				if peer == r.id {
 					continue
 				} else {
-					r.sendHeartbeatWithInfo(peer)
+					r.sendHeartbeat(peer)
 				}
 			}
 		}
@@ -671,7 +641,7 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 
 			//判断日志
 			if len(r.RaftLog.entries) > 0 {
-				if m.LogTerm < r.RaftLog.entries[len(r.RaftLog.entries)-1].Term && r.RaftLog.entries[len(r.RaftLog.entries)-1].Term >= m.Term {
+				if m.LogTerm != 0 && m.LogTerm < r.RaftLog.entries[len(r.RaftLog.entries)-1].Term {
 					m.Reject = true
 				} else if m.LogTerm == r.RaftLog.entries[len(r.RaftLog.entries)-1].Term {
 					if m.Index < r.RaftLog.entries[len(r.RaftLog.entries)-1].Index {
