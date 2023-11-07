@@ -190,6 +190,7 @@ func newRaft(c *Config) *Raft {
 		votes:            map[uint64]bool{},
 		Vote:             state.Vote,
 		Term:             state.Term,
+		Lead:             None,
 		//2AB
 		RaftLog: newLog(c.Storage),
 		Prs:     make(map[uint64]*Progress), // map[uint64]*Progress{}
@@ -565,7 +566,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		r.msgs = append(r.msgs, msg)
 		return
 	}
-	//日志任期大于节点的本地日志并且前面的日志的term能够匹配
+	//处理日志 日志任期大于节点的本地日志并且前面的日志的term能够匹配
 	if m.Term >= r.Term && term == m.LogTerm {
 		r.Term = m.Term
 		r.Lead = m.From
@@ -626,6 +627,12 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		msg.Reject = true
 	}
 
+	//没有日志 就处理心跳
+	if m.Term >= r.Term && r.Vote == m.From {
+		r.becomeFollower(m.Term, m.From)
+		r.heartbeatTimeout = 0
+	}
+
 	//todo 可能需要follower的commit
 	msg.Index = uint64(len(r.RaftLog.entries))
 	r.msgs = append(r.msgs, msg)
@@ -642,15 +649,14 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 		//消息的任期大于节点本身
 		if m.Term > r.Term || r.Vote == m.From || r.Vote == None {
 			msg := pb.Message{}
-			r.becomeFollower(m.Term, m.From)
+			r.becomeFollower(m.Term, None)
 			r.Term = m.Term
 			r.Vote = m.From
-			r.Lead = m.From
 			r.electionElapsed = 0
 
 			//判断日志
 			if len(r.RaftLog.entries) > 0 {
-				if m.LogTerm != 0 && m.LogTerm < r.RaftLog.entries[len(r.RaftLog.entries)-1].Term {
+				if m.LogTerm < r.RaftLog.entries[len(r.RaftLog.entries)-1].Term {
 					m.Reject = true
 				} else if m.LogTerm == r.RaftLog.entries[len(r.RaftLog.entries)-1].Term {
 					if m.Index < r.RaftLog.entries[len(r.RaftLog.entries)-1].Index {
