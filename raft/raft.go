@@ -245,9 +245,10 @@ func (r *Raft) sendHeartbeat(to uint64) {
 
 	//todo 关于含有日志的候选者要成为leader 关于LogTerm和Index设置
 	msg := pb.Message{
-		To:   to,
-		From: r.id,
-		Term: r.Term,
+		To:     to,
+		From:   r.id,
+		Term:   r.Term,
+		Commit: r.RaftLog.committed,
 	}
 
 	//获取peer的匹配日志
@@ -412,7 +413,7 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 
 		//处理心跳或者请求投票
-		if m.MsgType == pb.MessageType_MsgBeat || m.MsgType == pb.MessageType_MsgRequestVote {
+		if m.MsgType == pb.MessageType_MsgHeartbeat || m.MsgType == pb.MessageType_MsgRequestVote {
 			r.handleHeartbeat(m)
 		}
 
@@ -438,11 +439,27 @@ func (r *Raft) Step(m pb.Message) error {
 
 		//收到响应
 
-		if m.MsgType == pb.MessageType_MsgRequestVoteResponse && m.Reject == false {
-			r.votes[m.From] = true
-			if len(r.votes) > len(r.peers)/2 {
+		if m.MsgType == pb.MessageType_MsgRequestVoteResponse {
+			if m.Reject == false {
+				r.votes[m.From] = true
+
+			} else if m.Reject == true {
+				r.votes[m.From] = false
+			}
+
+			granted := 0
+
+			for _, vote := range r.votes {
+				if vote {
+					granted++
+				}
+			}
+
+			if granted > len(r.peers)/2 {
 				r.becomeLeader()
 				r.bcastAppend()
+			} else if len(r.votes)-granted == len(r.peers)/2+1 {
+				r.becomeFollower(r.Term, None)
 			}
 		}
 
@@ -466,6 +483,10 @@ func (r *Raft) Step(m pb.Message) error {
 
 		if m.MsgType == pb.MessageType_MsgRequestVote {
 			r.handleHeartbeat(m)
+		}
+
+		if m.MsgType == pb.MessageType_MsgHeartbeatResponse {
+			r.sendAppend(m.From)
 		}
 
 		if m.MsgType == pb.MessageType_MsgAppend {
@@ -684,6 +705,19 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 			r.Lead = m.From
 			r.Vote = m.From
 			r.electionElapsed = 0
+
+			if m.Commit > r.RaftLog.committed {
+				msg := pb.Message{
+					MsgType: pb.MessageType_MsgHeartbeatResponse,
+					To:      m.From,
+					From:    r.id,
+					Term:    r.Term,
+					Commit:  r.RaftLog.committed,
+				}
+
+				r.msgs = append(r.msgs, msg)
+			}
+
 		}
 	}
 }
