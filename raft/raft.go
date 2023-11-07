@@ -338,6 +338,7 @@ func (r *Raft) becomeCandidate() {
 	defer r.mu.Unlock()
 	r.State = StateCandidate
 	r.Term += 1
+	r.votes = make(map[uint64]bool)
 	//给自己投票
 	r.votes[r.id] = true
 	r.electionElapsed = 0
