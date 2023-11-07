@@ -218,7 +218,7 @@ func (r *Raft) sendAppend(to uint64) bool {
 		entries = append(entries, &r.RaftLog.entries[i])
 	}
 
-	term, err := r.RaftLog.Term(r.Prs[to].Next - 1)
+	term, err := r.RaftLog.Term(r.Prs[to].Match)
 	if err != nil {
 		return false
 	}
@@ -228,7 +228,7 @@ func (r *Raft) sendAppend(to uint64) bool {
 		From:    r.id,
 		Term:    r.Term,
 		LogTerm: term,
-		Index:   r.Prs[to].Next - 1,
+		Index:   r.Prs[to].Match,
 		Entries: entries,
 		Commit:  r.RaftLog.committed,
 	}
@@ -646,6 +646,7 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 	switch m.MsgType {
 
 	case pb.MessageType_MsgRequestVote:
+
 		//消息的任期大于节点本身
 		if m.Term > r.Term || r.Vote == m.From || r.Vote == None {
 			msg := pb.Message{}
