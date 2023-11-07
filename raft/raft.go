@@ -192,7 +192,7 @@ func newRaft(c *Config) *Raft {
 		Term:             state.Term,
 		//2AB
 		RaftLog: newLog(c.Storage),
-		Prs:     map[uint64]*Progress{},
+		Prs:     make(map[uint64]*Progress), // map[uint64]*Progress{}
 	}
 
 	for _, peer := range raft.peers {
@@ -254,7 +254,7 @@ func (r *Raft) sendHeartbeat(to uint64) {
 	if msg.Index == 0 {
 		msg.LogTerm = 0
 	} else {
-		msg.Term = r.RaftLog.entries[msg.Index-1].Term
+		msg.LogTerm = r.RaftLog.entries[msg.Index-1].Term
 	}
 
 	//根据角色的不同设置msg的type
@@ -605,6 +605,15 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 			for _, entry := range m.Entries {
 				r.RaftLog.entries = append(r.RaftLog.entries, *entry)
 			}
+
+			for _, peer := range r.peers {
+				if peer == r.id {
+					continue
+				}
+				r.Prs[peer].Match = uint64(len(r.RaftLog.entries))
+				r.Prs[peer].Next = uint64(len(r.RaftLog.entries)) + 1
+			}
+
 		}
 
 		//更新commited
