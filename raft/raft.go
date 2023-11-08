@@ -554,7 +554,7 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 			return matchInts[i] < matchInts[j]
 		})
 
-		if r.maybeCommit(matchInts[len(matchInts)/2]) {
+		if r.maybeCommit(matchInts[(len(matchInts)-1)/2]) {
 			r.bcastAppend()
 		}
 
@@ -562,7 +562,7 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 }
 
 func (r *Raft) maybeCommit(newCommited uint64) bool {
-	if newCommited > r.RaftLog.committed {
+	if newCommited > r.RaftLog.committed && r.RaftLog.entries[newCommited-1].Term == r.Term {
 		r.changeCommited(newCommited)
 		return true
 	}
