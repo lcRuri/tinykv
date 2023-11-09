@@ -103,6 +103,9 @@ func (l *RaftLog) allEntries() []pb.Entry {
 func (l *RaftLog) unstableEntries() []pb.Entry {
 	// Your Code Here (2A).
 
+	if len(l.entries) == 0 {
+		return []pb.Entry{}
+	}
 	return l.entries
 }
 
@@ -110,8 +113,14 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
 	//todo
+	lastIndex, _ := l.storage.LastIndex()
+	if lastIndex-1 > l.applied {
+		entries, _ := l.storage.Entries(l.applied, lastIndex)
+		ents = append(ents, entries...)
+	}
 
-	return l.entries[:l.committed-l.applied]
+	ents = append(ents, l.entries...)
+	return ents
 }
 
 // LastIndex return the last index of the log entries
