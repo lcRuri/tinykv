@@ -75,7 +75,7 @@ func newLog(storage Storage) *RaftLog {
 	raftLog := &RaftLog{
 		storage:   storage,
 		committed: state.Commit,
-		// todo why applied = firstIndex - 1
+
 		applied: firstIndex - 1,
 		stabled: lastIndex,
 		entries: entries,
@@ -111,14 +111,15 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 // nextEnts returns all the committed but not applied entries
 func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
-	return l.entries[l.applied : l.committed+1]
+	//todo
+
+	return l.entries[l.applied:l.committed]
 }
 
 // LastIndex return the last index of the log entries
 func (l *RaftLog) LastIndex() uint64 {
 	// Your Code Here (2A).
 
-	//why todo
 	return uint64(len(l.entries))
 }
 
@@ -127,20 +128,10 @@ func (l *RaftLog) LastIndex() uint64 {
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
 	// 判断index的范围
-	firstIndex, err := l.storage.FirstIndex()
-	lastIndex, err := l.storage.LastIndex()
-	if err != nil {
-		return 0, err
+
+	if i < 1 || i > uint64(len(l.entries)) {
+		return 0, nil
 	}
 
-	if i < firstIndex-1 || i > lastIndex {
-		return 0, err
-	}
-
-	term, err := l.storage.Term(i)
-	if err != nil {
-		return 0, err
-	}
-
-	return term, nil
+	return l.entries[i-1].Term, nil
 }

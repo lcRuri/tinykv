@@ -200,6 +200,10 @@ func newRaft(c *Config) *Raft {
 		raft.Prs[peer] = &Progress{Match: 0, Next: 1}
 	}
 
+	if c.Applied > 0 {
+		raft.RaftLog.applied = c.Applied
+	}
+
 	return raft
 }
 
@@ -354,7 +358,7 @@ func (r *Raft) becomeLeader() {
 
 	//变更状态
 	r.State = StateLeader
-
+	r.Lead = r.id
 	//设置nextInts和matchInts
 	// todo match是entries的下标 next为啥这么设置
 	for _, peer := range r.peers {
