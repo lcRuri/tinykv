@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"log"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
@@ -151,7 +152,31 @@ func (rn *RawNode) Step(m pb.Message) error {
 // Ready returns the current point-in-time state of this RawNode.
 func (rn *RawNode) Ready() Ready {
 	// Your Code Here (2A).
-	return Ready{}
+	softState := &SoftState{
+		Lead:      rn.Raft.Lead,
+		RaftState: rn.Raft.State,
+	}
+
+	hardState, _, err := rn.Raft.RaftLog.storage.InitialState()
+
+	snapshot, err := rn.Raft.RaftLog.storage.Snapshot()
+	if err != nil {
+		log.Printf("rawNode load State failed\n")
+	}
+
+	// entries保存的是没有持久化的数据数组
+	entries := rn.Raft.RaftLog.unstableEntries()
+	// 保存committed但是还没有applied的数据数组
+	committedEntries := rn.Raft.RaftLog.nextEnts()
+
+	return Ready{
+		SoftState:        softState,
+		HardState:        hardState,
+		Entries:          entries,
+		Snapshot:         snapshot,
+		CommittedEntries: committedEntries,
+		Messages:         rn.Raft.msgs,
+	}
 }
 
 // HasReady called when RawNode user need to check if any Ready pending.
@@ -162,8 +187,30 @@ func (rn *RawNode) HasReady() bool {
 
 // Advance notifies the RawNode that the application has applied and saved progress in the
 // last Ready results.
+// Advance 通知 RawNode 应用程序已申请并保存了进度
+// 最后的 Ready 结果。
 func (rn *RawNode) Advance(rd Ready) {
 	// Your Code Here (2A).
+	//applied rd中的entries 并且更改对应的状态
+	lastIndex, err := rn.Raft.RaftLog.storage.LastIndex()
+	if err != nil {
+		log.Printf("rn.Raft.RaftLog.storage.LastIndex() falied\n")
+	}
+
+	rn.Raft.RaftLog.applied = lastIndex
+	rn.Raft.RaftLog.stabled = lastIndex
+
+	//删除已经添加到storage中的日志
+	lastCommitedEntries := rd.CommittedEntries[len(rd.CommittedEntries)-1]
+	var index int
+	for i, entry := range rn.Raft.RaftLog.entries {
+		if entry.Index == lastCommitedEntries.Index && entry.Term == lastCommitedEntries.Term {
+			index = i
+			break
+		}
+	}
+
+	rn.Raft.RaftLog.entries = rn.Raft.RaftLog.entries[index+1:]
 }
 
 // GetProgress return the Progress of this node and its peers, if this
