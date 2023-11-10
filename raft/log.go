@@ -134,8 +134,11 @@ func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 			break
 		}
 	}
-
-	ents = append(ents, l.entries[index:l.committed]...)
+	if int(l.committed) > len(l.entries) {
+		ents = append(ents, l.entries[index:]...)
+	} else {
+		ents = append(ents, l.entries[index:l.committed]...)
+	}
 	return ents
 }
 
