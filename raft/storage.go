@@ -46,22 +46,29 @@ var ErrSnapshotTemporarilyUnavailable = errors.New("snapshot is temporarily unav
 // application is responsible for cleanup and recovery in this case.
 type Storage interface {
 	// InitialState returns the saved HardState and ConfState information.
+	// InitialState返回保存的 HardState and ConfState 信息
 	InitialState() (pb.HardState, pb.ConfState, error)
 	// Entries returns a slice of log entries in the range [lo,hi).
 	// MaxSize limits the total size of the log entries returned, but
 	// Entries returns at least one entry if any.
+	// Entries返回[lo,hi)的切片日志 最大值限制为整个日志大小，但是最少会返回一个
 	Entries(lo, hi uint64) ([]pb.Entry, error)
 	// Term returns the term of entry i, which must be in the range
 	// [FirstIndex()-1, LastIndex()]. The term of the entry before
 	// FirstIndex is retained for matching purposes even though the
 	// rest of that entry may not be available.
+	// Term返回日志i的任期，i的范围必须在[FirstIndex()-1, LastIndex()]在FirstIndex之前的日志的任期保留作为匹配的目的即使日志的其他部分不可用
 	Term(i uint64) (uint64, error)
 	// LastIndex returns the index of the last entry in the log.
+	// LastIndex 返回log里面最后entry的索引
+	// 从0开始
 	LastIndex() (uint64, error)
 	// FirstIndex returns the index of the first log entry that is
 	// possibly available via Entries (older entries have been incorporated
 	// into the latest Snapshot; if storage only contains the dummy entry the
 	// first log entry is not available).
+	// FirstIndex 返回第一条可能通过Entries获得的log entry的索引
+	// 从1开始
 	FirstIndex() (uint64, error)
 	// Snapshot returns the most recent snapshot.
 	// If snapshot is temporarily unavailable, it should return ErrSnapshotTemporarilyUnavailable,

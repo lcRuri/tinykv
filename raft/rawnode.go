@@ -77,6 +77,8 @@ type Ready struct {
 type RawNode struct {
 	Raft *Raft
 	// Your Data Here (2A).
+	preSoftState *SoftState
+	preHardState *pb.HardState
 }
 
 // NewRawNode returns a new RawNode given configuration and a list of raft peers.
@@ -84,7 +86,9 @@ type RawNode struct {
 func NewRawNode(config *Config) (*RawNode, error) {
 	// Your Code Here (2A).
 	raft := newRaft(config)
-	return &RawNode{Raft: raft}, nil
+	softstate := raft.SoftState()
+	hardState := raft.HardState()
+	return &RawNode{Raft: raft, preHardState: hardState, preSoftState: softstate}, nil
 }
 
 // Tick advances the internal logical clock by a single tick.
@@ -152,36 +156,37 @@ func (rn *RawNode) Step(m pb.Message) error {
 // Ready returns the current point-in-time state of this RawNode.
 func (rn *RawNode) Ready() Ready {
 	// Your Code Here (2A).
-	softState := &SoftState{
-		Lead:      rn.Raft.Lead,
-		RaftState: rn.Raft.State,
-	}
 
-	hardState, _, err := rn.Raft.RaftLog.storage.InitialState()
-
-	snapshot, err := rn.Raft.RaftLog.storage.Snapshot()
-	if err != nil {
-		log.Printf("rawNode load State failed\n")
-	}
-
-	// entries保存的是没有持久化的数据数组
 	entries := rn.Raft.RaftLog.unstableEntries()
 	// 保存committed但是还没有applied的数据数组
 	committedEntries := rn.Raft.RaftLog.nextEnts()
 
-	return Ready{
-		SoftState:        softState,
-		HardState:        hardState,
+	ready := Ready{
 		Entries:          entries,
-		Snapshot:         snapshot,
 		CommittedEntries: committedEntries,
 		Messages:         rn.Raft.msgs,
 	}
+
+	softState := &SoftState{
+		Lead:      rn.Raft.Lead,
+		RaftState: rn.Raft.State,
+	}
+	if softState.Lead != rn.preSoftState.Lead || softState.RaftState != rn.preSoftState.RaftState {
+		ready.SoftState = softState
+	}
+
+	hardState, _, _ := rn.Raft.RaftLog.storage.InitialState()
+	if hardState.Vote != rn.preHardState.Vote || hardState.Term != rn.preHardState.Term || hardState.Commit != rn.preHardState.Commit {
+		ready.HardState = hardState
+	}
+
+	return ready
 }
 
 // HasReady called when RawNode user need to check if any Ready pending.
 func (rn *RawNode) HasReady() bool {
 	// Your Code Here (2A).
+
 	return false
 }
 
