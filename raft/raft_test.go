@@ -101,6 +101,9 @@ func TestLeaderElection2AA(t *testing.T) {
 // testLeaderCycle verifies that each node in a cluster can campaign
 // and be elected in turn. This ensures that elections work when not
 // starting from a clean slate (as they do in TestLeaderElection)
+// testLeaderCycle验证集群中的每个节点都可以进行活动
+// 并依次当选。这确保了选举在不顺利的时候也能顺利进行
+// 从头开始(就像TestLeaderElection一样)
 func TestLeaderCycle2AA(t *testing.T) {
 	var cfg func(*Config)
 	n := newNetworkWithConfig(cfg, nil, nil, nil)
@@ -125,6 +128,8 @@ func TestLeaderCycle2AA(t *testing.T) {
 // newly-elected leader does *not* have the newest (i.e. highest term)
 // log entries, and must overwrite higher-term log entries with
 // lower-term ones.
+// TestLeaderElectionOverwriteNewerLogs 测试一个方案，其中
+// 新当选的领导人没有最新的（即最高任期）日志条目
 func TestLeaderElectionOverwriteNewerLogs2AB(t *testing.T) {
 	cfg := func(c *Config) {
 		c.peers = idsBySize(5)
@@ -283,8 +288,10 @@ func TestLogReplication2AB(t *testing.T) {
 	}
 
 	for i, tt := range tests {
+		//请求成为leader
 		tt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
 
+		//发起propsoe请求 同步日志
 		for _, m := range tt.msgs {
 			tt.send(m)
 		}
@@ -297,6 +304,7 @@ func TestLogReplication2AB(t *testing.T) {
 			}
 
 			ents := []pb.Entry{}
+
 			for _, e := range nextEnts(sm, tt.network.storage[j]) {
 				if e.Data != nil {
 					ents = append(ents, e)
@@ -389,6 +397,7 @@ func TestCommitWithHeartbeat2AB(t *testing.T) {
 	}
 }
 
+// 测试候选人决斗
 func TestDuelingCandidates2AB(t *testing.T) {
 	a := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
 	b := newTestRaft(2, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
@@ -676,9 +685,9 @@ func TestRecvMessageType_MsgRequestVote2AB(t *testing.T) {
 		sm.RaftLog = newLog(newMemoryStorageWithEnts([]pb.Entry{{}, {Index: 1, Term: 2}, {Index: 2, Term: 2}}))
 
 		// raft.Term is greater than or equal to raft.RaftLog.lastTerm. In this
-		// test we're only testing MessageType_MsgRequestVote responses when the campaigning node
-		// has a different raft log compared to the recipient node.
-		// Additionally we're verifying behaviour when the recipient node has
+		// test we're only testing MessageType_MsgRequestVote responses when the campaigning(竞选) node
+		// has a different raft log compared to the recipient(收件人) node.
+		// Additionally we're verifying(验证) behaviour when the recipient node has
 		// already given out its vote for its current term. We're not testing
 		// what the recipient node does when receiving a message with a
 		// different term number, so we simply initialize both term numbers to
@@ -999,7 +1008,7 @@ func TestRecvMessageType_MsgBeat2AA(t *testing.T) {
 
 func TestLeaderIncreaseNext2AB(t *testing.T) {
 	previousEnts := []pb.Entry{{Term: 1, Index: 1}, {Term: 1, Index: 2}, {Term: 1, Index: 3}}
-	// previous entries + noop entry + propose + 1
+	// previous entries + noop entry + propose + 1 = 6
 	wnext := uint64(len(previousEnts)) + 1 + 1 + 1
 
 	storage := NewMemoryStorage()
@@ -1504,10 +1513,13 @@ func TestSplitVote2AA(t *testing.T) {
 	n3.becomeFollower(1, None)
 
 	nt := newNetwork(n1, n2, n3)
+	//建立一个三节点集群然后让node1成为leader
 	nt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
 
 	// simulate leader down. followers start split vote.
+	// node1失联
 	nt.isolate(1)
+	//node2和node3都开始选举
 	nt.send([]pb.Message{
 		{From: 2, To: 2, MsgType: pb.MessageType_MsgHup},
 		{From: 3, To: 3, MsgType: pb.MessageType_MsgHup},
@@ -1516,6 +1528,7 @@ func TestSplitVote2AA(t *testing.T) {
 	// check whether the term values are expected
 	// n2.Term == 3
 	// n3.Term == 3
+	// 检查node2和node3的任期是否和想的一样
 	sm := nt.peers[2].(*Raft)
 	if sm.Term != 3 {
 		t.Errorf("peer 2 term: %d, want %d", sm.Term, 3)
@@ -1528,6 +1541,7 @@ func TestSplitVote2AA(t *testing.T) {
 	// check state
 	// n2 == candidate
 	// n3 == candidate
+	//查看状态是否都是候选者
 	sm = nt.peers[2].(*Raft)
 	if sm.State != StateCandidate {
 		t.Errorf("peer 2 state: %s, want %s", sm.State, StateCandidate)
@@ -1538,6 +1552,7 @@ func TestSplitVote2AA(t *testing.T) {
 	}
 
 	// node 2 election timeout first
+	// node2 选举超时
 	nt.send(pb.Message{From: 2, To: 2, MsgType: pb.MessageType_MsgHup})
 
 	// check whether the term values are expected
@@ -1620,6 +1635,7 @@ func newNetwork(peers ...stateMachine) *network {
 
 // newNetworkWithConfig is like newNetwork but calls the given func to
 // modify the configuration of any state machines it creates.
+// newNetworkWithConfig 类似于 newNetwork，但调用给定的 func 来修改它创建的任何状态机的配置
 func newNetworkWithConfig(configFunc func(*Config), peers ...stateMachine) *network {
 	size := len(peers)
 	peerAddrs := idsBySize(size)
