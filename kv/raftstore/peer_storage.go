@@ -3,6 +3,7 @@ package raftstore
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/Connor1996/badger"
@@ -306,8 +307,27 @@ func ClearMeta(engines *engine_util.Engines, kvWB, raftWB *engine_util.WriteBatc
 
 // Append the given entries to the raft log and update ps.raftState also delete log entries that will
 // never be committed
+// 将给定的日志添加到raft log中并且更新peerstorage的状态也要删除那些将不会被提交的日志条目
 func (ps *PeerStorage) Append(entries []eraftpb.Entry, raftWB *engine_util.WriteBatch) error {
 	// Your Code Here (2B).
+	// entries的日志是已经被raft大部分同意并且保存了的 需要存储到磁盘上面
+	// 只需将 raft.Ready.Entries 处的所有日志保存到 raftdb，
+	// 并删除之前追加的任何日志，这些日志永远不会被提交。
+	// 同时，更新 peer storage 的RaftLocalState 并将其保存到 raftdb
+	raftdb := ps.Engines.Raft
+	regionId := ps.region.Id
+	for _, entry := range entries {
+
+		logIndex := entry.Index
+		key := meta.RaftLogKey(regionId, logIndex)
+
+		val := entry.Data
+
+		raftWB.SetCF(strconv.Itoa(int(regionId)), key, val)
+	}
+
+	raftWB.WriteToDB(raftdb)
+
 	return nil
 }
 
@@ -328,10 +348,46 @@ func (ps *PeerStorage) ApplySnapshot(snapshot *eraftpb.Snapshot, kvWB *engine_ut
 
 // Save memory states to disk.
 // Do not modify ready in this function, this is a requirement to advance the ready object properly later.
+// 将处于内存的状态保存到磁盘上
+// 不要在这个函数中修改修改ready，这是advance正确推进ready对象的要求
 func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, error) {
 	// Hint: you may call `Append()` and `ApplySnapshot()` in this function
 	// Your Code Here (2B/2C).
-	return nil, nil
+
+	raftWB := new(engine_util.WriteBatch)
+	kvWB := new(engine_util.WriteBatch)
+	//将日志存储到磁盘上
+	err := ps.Append(ready.Entries, raftWB)
+
+	l := len(ready.Entries)
+	hardState := ready.HardState
+
+	state := &eraftpb.HardState{
+		Term:   hardState.Term,
+		Vote:   hardState.Vote,
+		Commit: hardState.Commit,
+	}
+	localState := &rspb.RaftLocalState{
+		HardState: state,
+		LastIndex: ready.Entries[l-1].Index,
+		LastTerm:  ready.Entries[l-1].Term,
+	}
+	//更新ps的raftState
+	ps.raftState = localState
+	raftStateKey := meta.RaftStateKey(ps.region.Id)
+	//存储到磁盘上
+	raftWB.SetMeta(raftStateKey, localState)
+
+	snapshot, err := ps.Snapshot()
+	if err != nil {
+		return nil, err
+	}
+
+	applySnapshot, err := ps.ApplySnapshot(&snapshot, kvWB, raftWB)
+	if err != nil {
+		return nil, err
+	}
+	return applySnapshot, nil
 }
 
 func (ps *PeerStorage) ClearData() {
