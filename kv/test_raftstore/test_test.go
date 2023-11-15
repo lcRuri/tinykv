@@ -29,6 +29,7 @@ func runClient(t *testing.T, me int, ca chan bool, fn func(me int, t *testing.T)
 }
 
 // spawn ncli clients and wait until they are all done
+// 生成 ncli 客户端并等待它们全部完成
 func SpawnClientsAndWait(t *testing.T, ch chan bool, ncli int, fn func(me int, t *testing.T)) {
 	defer func() { ch <- true }()
 	ca := make([]chan bool, ncli)
@@ -142,6 +143,18 @@ func confchanger(t *testing.T, cluster *Cluster, ch chan bool, done *int32) {
 // - If maxraftlog is a positive number, the count of the persistent log for Raft shouldn't exceed 2*maxraftlog.
 // - If confchange is set, the cluster will schedule random conf change concurrently.
 // - If split is set, split region when size exceed 1024 bytes.
+// / 基本测试如下：一个或多个客户端提交 Put/Scan
+//
+//	在一段时间内对服务器集的操作。 经期过后
+//	最后，测试检查所有序列值是否存在，并且
+//	特定键并执行 Delete 进行清理。
+//
+// - 如果设置了不可靠，则 RPC 可能会失败。
+// - 如果设置了崩溃，则服务器将在时间段结束后重新启动。
+// - 如果设置了分区，则测试会在服务器之间并发对网络进行重新分区。
+// - 如果 maxraftlog 为正数，则 Raft 的持久化日志计数不应超过 2*maxraftlog。
+// - 如果设置了 confchange，集群将同时调度随机 conf 更改。
+// - 如果设置了split，则当大小超过1024字节时，将拆分区域。
 func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash bool, partitions bool, maxraftlog int, confchange bool, split bool) {
 	title := "Test: "
 	if unreliable {
@@ -234,6 +247,8 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 			time.Sleep(100 * time.Millisecond)
 			go confchanger(t, cluster, ch_confchange, &done_confchanger)
 		}
+
+		//todo why
 		time.Sleep(5 * time.Second)
 		atomic.StoreInt32(&done_clients, 1)     // tell clients to quit
 		atomic.StoreInt32(&done_partitioner, 1) // tell partitioner to quit

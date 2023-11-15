@@ -30,6 +30,8 @@ func newRaftWorker(ctx *GlobalContext, pm *router) *raftWorker {
 // run runs raft commands.
 // On each loop, raft commands are batched by channel buffer.
 // After commands are handled, we collect apply messages by peers, make a applyBatch, send it to apply channel.
+// run函数执行raft的命令，raft 命令由通道缓冲区批处理
+// 在命令被执行之后，我们收集 Peer 节点的 apply 消息，制作一个 applyBatch，发送到 apply 通道
 func (rw *raftWorker) run(closeCh <-chan struct{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 	var msgs []message.Msg
@@ -54,6 +56,7 @@ func (rw *raftWorker) run(closeCh <-chan struct{}, wg *sync.WaitGroup) {
 			newPeerMsgHandler(peerState.peer, rw.ctx).HandleMsg(msg)
 		}
 		for _, peerState := range peerStateMap {
+			//开始lab2b(step6)
 			newPeerMsgHandler(peerState.peer, rw.ctx).HandleRaftReady()
 		}
 	}

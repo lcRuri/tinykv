@@ -208,6 +208,7 @@ func (c *NodeSimulator) CallCommandOnStore(storeID uint64, request *raft_cmdpb.R
 	c.RUnlock()
 
 	cb := message.NewCallback()
+	//lab2b入口
 	err := router.SendRaftCommand(request, cb)
 	if err != nil {
 		return nil, nil

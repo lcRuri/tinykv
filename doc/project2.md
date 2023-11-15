@@ -125,7 +125,7 @@ peer storage 是通过 Part A 中的存储接口进行交互，但是除了 raft
 
 这些元数据应该在 PeerStorage 中创建和更新。当创建 PeerStorage 时，见kv/raftstore/peer_storage.go 。它初始化这个 Peer 的 RaftLocalState、RaftApplyState，或者在重启的情况下从底层引擎获得之前的值。**注意，RAFT_INIT_LOG_TERM 和 RAFT_INIT_LOG_INDEX 的值都是5（只要大于1），但不是0。**之所以不设置为0，是为了区别于 peer 在更改 conf 后被动创建的情况。你现在可能还不太明白，所以只需记住它，细节将在 project3b 中描述，当你实现 conf change 时。
 
-在这部分你需要实现的代码只有一个函数 PeerStorage.SaveReadyState，这个函数的作用是将 raft.Ready 中的数据保存到 badger 中，包括追加日志和保存 Raft 硬状态。
+在这部分你需要实现的代码**只有一个函数 PeerStorage.SaveReadyState**，这个函数的作用是将 raft.Ready 中的数据保存到 badger 中，包括追加日志和保存 Raft 硬状态。
 
 要追加日志，只需将 raft.Ready.Entries 处的所有日志保存到 raftdb，并删除之前追加的任何日志，这些日志永远不会被提交。同时，更新 peer storage 的RaftLocalState 并将其保存到 raftdb。
 
@@ -140,7 +140,11 @@ peer storage 是通过 Part A 中的存储接口进行交互，但是除了 raft
 
 在 Project2 的 PartA ，你已经建立了一个基于 tick 的 Raft 模块。现在你需要编写驱动它的外部流程。大部分代码已经在 kv/raftstore/peer_msg_handler.go 和kv/raftstore/peer.go 下实现。所以你需要学习这些代码，完成proposalRaftCommand 和 HandleRaftReady 的逻辑。下面是对该框架的一些解释。
 
-Raft RawNode 已经用 PeerStorage 创建并存储在 peer 中。在 raft Worker 中，你可以看到它接收了 peer 并通过 peerMsgHandler 将其包装起来。peerMsgHandler主要有两个功能：一个是 HandleMsgs，另一个是 HandleRaftReady。
+**Raft RawNode 已经用 PeerStorage 创建并存储在 peer 中。在 raft Worker 中，你可以看到它接收了 peer 并通过 peerMsgHandler 将其包装起来。peerMsgHandler主要有两个功能：**
+
+**一个是 HandleMsgs，**(处理外来的信息，发送给raft)
+
+**另一个是 HandleRaftReady。**（处理raft处理好的消息，存储到db中）
 
 HandleMsgs 处理所有从 raftCh 收到的消息，包括调用 RawNode.Tick() 驱动Raft的MsgTypeTick、包装来自客户端请求的 MsgTypeRaftCmd 和 Raft peer 之间传送的MsgTypeRaftMessage。所有的消息类型都在 kv/raftstore/message/msg.go 中定义。你可以查看它的细节，其中一些将在下面的部分中使用。
 

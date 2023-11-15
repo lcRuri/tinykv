@@ -25,12 +25,12 @@ import (
 // RaftStorage is an implementation of `Storage` (see tikv/server.go) backed by a Raft node. It is part of a Raft network.
 // By using Raft, reads and writes are consistent with other nodes in the TinyKV instance.
 type RaftStorage struct {
-	engines *engine_util.Engines
+	engines *engine_util.Engines //badger存储
 	config  *config.Config
 
 	node          *raftstore.Node
-	snapManager   *snap.SnapManager
-	raftRouter    *raftstore.RaftstoreRouter
+	snapManager   *snap.SnapManager          //快照管理
+	raftRouter    *raftstore.RaftstoreRouter //发送和存储消息
 	raftSystem    *raftstore.Raftstore
 	resolveWorker *worker.Worker
 	snapWorker    *worker.Worker
@@ -46,6 +46,7 @@ func (re *RegionError) Error() string {
 	return re.RequestErr.String()
 }
 
+// 检查合法性
 func (rs *RaftStorage) checkResponse(resp *raft_cmdpb.RaftCmdResponse, reqCount int) error {
 	if resp.Header.Error != nil {
 		return &RegionError{RequestErr: resp.Header.Error}
@@ -58,6 +59,7 @@ func (rs *RaftStorage) checkResponse(resp *raft_cmdpb.RaftCmdResponse, reqCount 
 }
 
 // NewRaftStorage creates a new storage engine backed by a raftstore.
+// 新建存储
 func NewRaftStorage(conf *config.Config) *RaftStorage {
 	dbPath := conf.DBPath
 	kvPath := filepath.Join(dbPath, "kv")
@@ -76,8 +78,11 @@ func NewRaftStorage(conf *config.Config) *RaftStorage {
 }
 
 func (rs *RaftStorage) Write(ctx *kvrpcpb.Context, batch []storage.Modify) error {
+	// 用来存经过处理后的batch请求
 	var reqs []*raft_cmdpb.Request
+	// 批量处理请求
 	for _, m := range batch {
+		//判断请求的类型
 		switch m.Data.(type) {
 		case storage.Put:
 			put := m.Data.(storage.Put)
@@ -99,6 +104,7 @@ func (rs *RaftStorage) Write(ctx *kvrpcpb.Context, batch []storage.Modify) error
 		}
 	}
 
+	//将ctx中存储的数据封装到RaftRequestHeader中
 	header := &raft_cmdpb.RaftRequestHeader{
 		RegionId:    ctx.RegionId,
 		Peer:        ctx.Peer,
@@ -109,15 +115,20 @@ func (rs *RaftStorage) Write(ctx *kvrpcpb.Context, batch []storage.Modify) error
 		Header:   header,
 		Requests: reqs,
 	}
+
+	//新建一个chan
 	cb := message.NewCallback()
+	//通过RaftStorage的router将请求发送到router的chan中
 	if err := rs.raftRouter.SendRaftCommand(request, cb); err != nil {
 		return err
 	}
 
+	// 将cb中的请求拿出来进行检查
 	return rs.checkResponse(cb.WaitResp(), len(reqs))
 }
 
 func (rs *RaftStorage) Reader(ctx *kvrpcpb.Context) (storage.StorageReader, error) {
+	//封装所在位置消息
 	header := &raft_cmdpb.RaftRequestHeader{
 		RegionId:    ctx.RegionId,
 		Peer:        ctx.Peer,
@@ -131,11 +142,14 @@ func (rs *RaftStorage) Reader(ctx *kvrpcpb.Context) (storage.StorageReader, erro
 			Snap:    &raft_cmdpb.SnapRequest{},
 		}},
 	}
+
+	//向router中发送请求
 	cb := message.NewCallback()
 	if err := rs.raftRouter.SendRaftCommand(request, cb); err != nil {
 		return nil, err
 	}
 
+	//取出请求并检查是否有问题
 	resp := cb.WaitResp()
 	if err := rs.checkResponse(resp, 1); err != nil {
 		if cb.Txn != nil {
@@ -146,10 +160,13 @@ func (rs *RaftStorage) Reader(ctx *kvrpcpb.Context) (storage.StorageReader, erro
 	if cb.Txn == nil {
 		panic("can not found region snap")
 	}
+
+	//没问题返回一个新的reader
 	return NewRegionReader(cb.Txn, *resp.Responses[0].GetSnap().Region), nil
 }
 
 func (rs *RaftStorage) Raft(stream tinykvpb.TinyKv_RaftServer) error {
+	// 持续从TinyKv_RaftServer中接受消息并发送给rs.raftRouter
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
@@ -193,9 +210,11 @@ func (rs *RaftStorage) Start() error {
 	rs.snapWorker.Start(snapRunner)
 
 	raftClient := newRaftClient(cfg)
+	//开始lab2b(step1)
 	trans := NewServerTransport(raftClient, snapSender, rs.raftRouter, resolveSender)
 
 	rs.node = raftstore.NewNode(rs.raftSystem, rs.config, schedulerClient)
+	//开始lab2b(step1)
 	err = rs.node.Start(context.TODO(), rs.engines, trans, rs.snapManager)
 	if err != nil {
 		return err

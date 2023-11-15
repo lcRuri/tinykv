@@ -19,8 +19,8 @@ type peerState struct {
 
 // router routes a message to a peer.
 type router struct {
-	peers       sync.Map // regionID -> peerState
-	peerSender  chan message.Msg
+	peers       sync.Map         // regionID -> peerState
+	peerSender  chan message.Msg //存储msg 之后将这个赋给worker进行处理
 	storeSender chan<- message.Msg
 }
 
@@ -63,6 +63,7 @@ func (pr *router) send(regionID uint64, msg message.Msg) error {
 	if p == nil || atomic.LoadUint32(&p.closed) == 1 {
 		return errPeerNotFound
 	}
+	//将消息发送到chan中
 	pr.peerSender <- msg
 	return nil
 }

@@ -104,8 +104,8 @@ type Transport interface {
 	Send(msg *rspb.RaftMessage) error
 }
 
-/// loadPeers loads peers in this store. It scans the db engine, loads all regions and their peers from it
-/// WARN: This store should not be used before initialized.
+// / loadPeers loads peers in this store. It scans the db engine, loads all regions and their peers from it
+// / WARN: This store should not be used before initialized.
 func (bs *Raftstore) loadPeers() ([]*peer, error) {
 	// Scan region meta to get saved regions.
 	startKey := meta.RegionMetaMinKey
@@ -257,6 +257,7 @@ func (bs *Raftstore) start(
 	for _, peer := range regionPeers {
 		bs.router.register(peer)
 	}
+	//开始lab2b(step4) worker处理
 	bs.startWorkers(regionPeers)
 	return nil
 }
@@ -266,7 +267,9 @@ func (bs *Raftstore) startWorkers(peers []*peer) {
 	workers := bs.workers
 	router := bs.router
 	bs.wg.Add(2) // raftWorker, storeWorker
+	//开始lab2b(step5)
 	rw := newRaftWorker(ctx, router)
+	//开始lab2b(step5)
 	go rw.run(bs.closeCh, bs.wg)
 	sw := newStoreWorker(ctx, bs.storeState)
 	go sw.run(bs.closeCh, bs.wg)
