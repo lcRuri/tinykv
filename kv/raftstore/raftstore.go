@@ -153,6 +153,7 @@ func (bs *Raftstore) loadPeers() ([]*peer, error) {
 				continue
 			}
 
+			//创建流程
 			peer, err := createPeer(storeID, ctx.cfg, ctx.regionTaskSender, ctx.engine, region)
 			if err != nil {
 				return err
@@ -249,6 +250,7 @@ func (bs *Raftstore) start(
 		schedulerClient:      schedulerClient,
 		tickDriverSender:     bs.tickDriver.newRegionCh,
 	}
+	//创建流程
 	regionPeers, err := bs.loadPeers()
 	if err != nil {
 		return err

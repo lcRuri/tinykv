@@ -188,10 +188,13 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 		cfg.RegionMaxSize = 300
 		cfg.RegionSplitSize = 200
 	}
+	//创建集群
 	cluster := NewTestCluster(nservers, cfg)
+	//启动集群
 	cluster.Start()
 	defer cluster.Shutdown()
 
+	//选举
 	electionTimeout := cfg.RaftBaseTickInterval * time.Duration(cfg.RaftElectionTimeoutTicks)
 	// Wait for leader election
 	time.Sleep(2 * electionTimeout)

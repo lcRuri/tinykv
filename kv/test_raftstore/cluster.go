@@ -136,6 +136,7 @@ func (c *Cluster) Start() {
 	}
 
 	for storeID := range c.engines {
+		//对应的engine启动服务器
 		c.StartServer(storeID)
 	}
 }
@@ -169,6 +170,7 @@ func (c *Cluster) StartServer(storeID uint64) {
 	// do not share config because of different DBPath
 	storeCfg := *c.cfg
 	storeCfg.DBPath = c.dbPaths[storeID]
+	//创建raft流程
 	err := c.simulator.RunStore(&storeCfg, engine, context.TODO())
 	if err != nil {
 		panic(err)
