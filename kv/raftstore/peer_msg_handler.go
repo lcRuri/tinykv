@@ -46,6 +46,8 @@ func (d *peerMsgHandler) HandleRaftReady() {
 	if d.RaftGroup.HasReady() {
 		ready := d.RaftGroup.Ready()
 		d.peerStorage.SaveReadyState(&ready)
+
+		d.Send(nil, ready.Messages)
 	}
 
 }
@@ -119,6 +121,8 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 		return
 	}
 	// Your Code Here (2B).
+	log.Infof("send msg???")
+
 }
 
 func (d *peerMsgHandler) onTick() {
