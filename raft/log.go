@@ -164,3 +164,10 @@ func (l *RaftLog) Term(i uint64) (uint64, error) {
 
 	return l.entries[i-1].Term, nil
 }
+
+func (l *RaftLog) hasNextEnts() bool {
+	index, _ := l.storage.FirstIndex()
+
+	off := max(l.applied+1, index)
+	return l.committed+1 > off
+}

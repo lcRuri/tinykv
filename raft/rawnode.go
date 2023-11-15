@@ -186,8 +186,28 @@ func (rn *RawNode) Ready() Ready {
 // HasReady called when RawNode user need to check if any Ready pending.
 func (rn *RawNode) HasReady() bool {
 	// Your Code Here (2A).
+	r := rn.Raft
+	hardState, _, err := r.RaftLog.storage.InitialState()
+	if err != nil {
+		panic(err)
+	}
+	if hardState.Vote == rn.preHardState.Vote && hardState.Term == rn.preHardState.Term && hardState.Commit == rn.preHardState.Commit {
+		return false
+	}
 
-	return false
+	softState := &SoftState{
+		Lead:      rn.Raft.Lead,
+		RaftState: rn.Raft.State,
+	}
+	if softState.Lead == rn.preSoftState.Lead && softState.RaftState == rn.preSoftState.RaftState {
+		return false
+	}
+
+	if len(r.msgs) > 0 || len(r.RaftLog.unstableEntries()) > 0 || r.RaftLog.hasNextEnts() {
+		return false
+	}
+
+	return true
 }
 
 // Advance notifies the RawNode that the application has applied and saved progress in the

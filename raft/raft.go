@@ -16,8 +16,8 @@ package raft
 
 import (
 	"errors"
+	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
-	"github.com/pingcap/log"
 	"math/rand"
 	"sort"
 	"sync"
@@ -188,7 +188,7 @@ func newRaft(c *Config) *Raft {
 		panic(err.Error())
 	}
 	// Your Code Here (2A).
-	state, _, err := c.Storage.InitialState()
+	state, confstate, err := c.Storage.InitialState()
 	if err != nil {
 		panic(err)
 	}
@@ -209,6 +209,10 @@ func newRaft(c *Config) *Raft {
 		//2AB
 		RaftLog: newLog(c.Storage),
 		Prs:     make(map[uint64]*Progress), // map[uint64]*Progress{}
+	}
+
+	if c.peers == nil {
+		c.peers = confstate.Nodes
 	}
 
 	for _, peer := range raft.peers {
@@ -362,6 +366,7 @@ func (r *Raft) becomeCandidate() {
 	r.votes[r.id] = true
 	r.electionElapsed = 0
 
+	log.Infof("[info] raft:%d become candidate", r.id)
 }
 
 // becomeLeader transform this peer's state to leader
@@ -392,6 +397,8 @@ func (r *Raft) becomeLeader() {
 	}
 	r.Prs[r.id].Match = uint64(len(r.RaftLog.entries))
 	r.Prs[r.id].Next = uint64(len(r.RaftLog.entries)) + 1
+
+	log.Infof("[info] raft:%d become candidate", r.id)
 }
 
 func (r *Raft) bcastAppend() {
