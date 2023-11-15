@@ -20,7 +20,6 @@ import (
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"math/rand"
 	"sort"
-	"sync"
 )
 
 // None is a placeholder node ID used when there is no leader.
@@ -116,7 +115,6 @@ type Raft struct {
 	Term uint64
 	Vote uint64
 
-	mu    *sync.Mutex
 	peers []uint64
 	resp  int
 
@@ -198,7 +196,6 @@ func newRaft(c *Config) *Raft {
 		heartbeatTimeout: c.HeartbeatTick,
 		electionTimeout:  c.ElectionTick,
 		State:            StateFollower,
-		mu:               new(sync.Mutex),
 		electionElapsed:  0,
 		heartbeatElapsed: 0,
 		peers:            c.peers,
@@ -212,7 +209,7 @@ func newRaft(c *Config) *Raft {
 	}
 
 	if c.peers == nil {
-		c.peers = confstate.Nodes
+		raft.peers = confstate.Nodes
 	}
 
 	for _, peer := range raft.peers {
@@ -326,7 +323,6 @@ func (r *Raft) tick() {
 			msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, To: r.id}
 			//将msg发送到本地的msgs,msgHup表示start a new election.
 			r.Step(msg)
-
 			r.electionElapsed = 0
 		}
 
@@ -345,9 +341,6 @@ func (r *Raft) tick() {
 // becomeFollower transform this peer's state to Follower
 func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	// Your Code Here (2A).
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	r.State = StateFollower
 	r.Term = term
 	r.Lead = lead
@@ -357,8 +350,6 @@ func (r *Raft) becomeFollower(term uint64, lead uint64) {
 // becomeCandidate transform this peer's state to candidate
 func (r *Raft) becomeCandidate() {
 	// Your Code Here (2A).
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.State = StateCandidate
 	r.Term += 1
 	r.votes = make(map[uint64]bool)
@@ -366,15 +357,13 @@ func (r *Raft) becomeCandidate() {
 	r.votes[r.id] = true
 	r.electionElapsed = 0
 
-	log.Infof("[info] raft:%d become candidate", r.id)
+	//log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
 }
 
 // becomeLeader transform this peer's state to leader
 func (r *Raft) becomeLeader() {
 	// Your Code Here (2A).
 	// NOTE: Leader should propose a noop entry on its term
-	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	//变更状态
 	r.State = StateLeader
@@ -398,7 +387,7 @@ func (r *Raft) becomeLeader() {
 	r.Prs[r.id].Match = uint64(len(r.RaftLog.entries))
 	r.Prs[r.id].Next = uint64(len(r.RaftLog.entries)) + 1
 
-	log.Infof("[info] raft:%d become candidate", r.id)
+	//log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
 }
 
 func (r *Raft) bcastAppend() {
@@ -434,13 +423,14 @@ func (r *Raft) Step(m pb.Message) error {
 				} else {
 					//todo 区别是否已经有了日志
 					r.sendHeartbeat(peer)
-
+					//log.Infof("raft:%d send msg to raft:%d", r.id, peer)
 				}
 			}
 		}
 
 		//处理心跳或者请求投票
 		if m.MsgType == pb.MessageType_MsgHeartbeat || m.MsgType == pb.MessageType_MsgRequestVote {
+			//log.Infof("raft:%d receive msg from raft:%d,msgtype:%d", r.id, m.From, m.MsgType)
 			r.handleHeartbeat(m)
 		}
 
