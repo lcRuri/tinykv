@@ -125,7 +125,7 @@ peer storage 是通过 Part A 中的存储接口进行交互，但是除了 raft
 
 这些元数据应该在 PeerStorage 中创建和更新。当创建 PeerStorage 时，见kv/raftstore/peer_storage.go 。它初始化这个 Peer 的 RaftLocalState、RaftApplyState，或者在重启的情况下从底层引擎获得之前的值。**注意，RAFT_INIT_LOG_TERM 和 RAFT_INIT_LOG_INDEX 的值都是5（只要大于1），但不是0。**之所以不设置为0，是为了区别于 peer 在更改 conf 后被动创建的情况。你现在可能还不太明白，所以只需记住它，细节将在 project3b 中描述，当你实现 conf change 时。
 
-在这部分你需要实现的代码**只有一个函数 PeerStorage.SaveReadyState**，这个函数的作用是将 raft.Ready 中的数据保存到 badger 中，包括追加日志和保存 Raft 硬状态。
+**在这部分你需要实现的代码只有一个函数 PeerStorage.SaveReadyState，这个函数的作用是将 raft.Ready 中的数据保存到 badger 中，包括追加日志和保存 Raft 硬状态。**
 
 要追加日志，只需将 raft.Ready.Entries 处的所有日志保存到 raftdb，并删除之前追加的任何日志，这些日志永远不会被提交。同时，更新 peer storage 的RaftLocalState 并将其保存到 raftdb。
 
@@ -148,7 +148,7 @@ peer storage 是通过 Part A 中的存储接口进行交互，但是除了 raft
 
 HandleMsgs 处理所有从 raftCh 收到的消息，包括调用 RawNode.Tick() 驱动Raft的MsgTypeTick、包装来自客户端请求的 MsgTypeRaftCmd 和 Raft peer 之间传送的MsgTypeRaftMessage。所有的消息类型都在 kv/raftstore/message/msg.go 中定义。你可以查看它的细节，其中一些将在下面的部分中使用。
 
-在消息被处理后，Raft 节点应该有一些状态更新。所以 HandleRaftReady 应该从Raft 模块获得Ready，并做相应的动作，如持久化日志，应用已提交的日志，并通过网络向其他 peer 发送 raft 消息。
+在消息被处理后，Raft 节点应该有一些状态更新。所以 HandleRaftReady 应该从Raft 模块获得Ready，并做相应的动作，如持久化日志，应用已提交的日志，并**通过网络向其他 peer 发送 raft 消息**。
 
 在一个伪代码中，raftstore 使用 Raft:
 
@@ -200,7 +200,7 @@ ErrStaleCommand：可能由于领导者的变化，一些日志没有被提交�
 >
 > - PeerStorage 实现了 Raft 模块的存储接口，你应该使用提供的SaveRaftReady() 方法来持久化Raft的相关状态。
 > - 使用 engine_util 中的 WriteBatch 来进行原子化的多次写入，例如，你需要确保在一个写入批次中应用提交的日志并更新应用的索引。
-> - 使用 Transport 向其他 peer 发送 raft 消息，它在 GlobalContext 中。
+> - **使用 Transport 向其他 peer 发送 raft 消息，它在 GlobalContext 中。**
 > - 服务器不应该完成 RPC，如果它不是多数节点的一部分，并且没有最新的数据。你可以直接把获取操作放到 Raft 日志中，或者实现 Raft 论文第8节中描述的对只读操作的优化。
 > - 在应用日志时，不要忘记更新和持久化应用状态机。
 > - 你可以像TiKV那样以异步的方式应用已提交的Raft日志条目。这不是必须的，虽然对提高性能是一个很大的提升。
