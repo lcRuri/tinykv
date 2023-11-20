@@ -3,7 +3,6 @@ package raftstore
 import (
 	"bytes"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/Connor1996/badger"
@@ -314,6 +313,30 @@ func (ps *PeerStorage) Append(entries []eraftpb.Entry, raftWB *engine_util.Write
 	// 只需将 raft.Ready.Entries 处的所有日志保存到 raftdb，
 	// 并删除之前追加的任何日志，这些日志永远不会被提交。
 	// 同时，更新 peer storage 的RaftLocalState 并将其保存到 raftdb
+
+	if len(entries) == 0 {
+		return nil
+	}
+
+	lastIndex, err := ps.LastIndex()
+	if err != nil {
+		return err
+	}
+
+	pos := 0
+
+	for _, entry := range entries {
+		if entry.Index > lastIndex {
+			break
+		}
+		pos++
+	}
+
+	entries = entries[pos:]
+	if len(entries) == 0 {
+		return nil
+	}
+
 	raftdb := ps.Engines.Raft
 	regionId := ps.region.Id
 	for _, entry := range entries {
@@ -321,9 +344,7 @@ func (ps *PeerStorage) Append(entries []eraftpb.Entry, raftWB *engine_util.Write
 		logIndex := entry.Index
 		key := meta.RaftLogKey(regionId, logIndex)
 
-		val := entry.Data
-
-		raftWB.SetCF(strconv.Itoa(int(regionId)), key, val)
+		raftWB.SetMeta(key, &entry)
 	}
 
 	raftWB.WriteToDB(raftdb)
@@ -355,7 +376,6 @@ func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, erro
 	// Your Code Here (2B/2C).
 
 	raftWB := new(engine_util.WriteBatch)
-	kvWB := new(engine_util.WriteBatch)
 	//将日志存储到磁盘上
 	err := ps.Append(ready.Entries, raftWB)
 
@@ -378,16 +398,9 @@ func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, erro
 	//存储到磁盘上
 	raftWB.SetMeta(raftStateKey, localState)
 
-	snapshot, err := ps.Snapshot()
-	if err != nil {
-		return nil, err
-	}
+	var applySnapshot *ApplySnapResult
 
-	applySnapshot, err := ps.ApplySnapshot(&snapshot, kvWB, raftWB)
-	if err != nil {
-		return nil, err
-	}
-	return applySnapshot, nil
+	return applySnapshot, err
 }
 
 func (ps *PeerStorage) ClearData() {
