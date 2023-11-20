@@ -43,11 +43,12 @@ func (d *peerMsgHandler) HandleRaftReady() {
 		return
 	}
 	// Your Code Here (2B).
+	//todo
+	ready := d.RaftGroup.Ready()
 	if d.RaftGroup.HasReady() {
-		ready := d.RaftGroup.Ready()
 		d.peerStorage.SaveReadyState(&ready)
-
-		d.Send(nil, ready.Messages)
+	} else {
+		d.Send(d.ctx.trans, ready.Messages)
 	}
 
 }
@@ -61,6 +62,7 @@ func (d *peerMsgHandler) HandleMsg(msg message.Msg) {
 		}
 	case message.MsgTypeRaftCmd:
 		raftCMD := msg.Data.(*message.MsgRaftCmd)
+		//lab2b
 		d.proposeRaftCommand(raftCMD.Request, raftCMD.Callback)
 	case message.MsgTypeTick:
 		d.onTick()
@@ -121,7 +123,14 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 		return
 	}
 	// Your Code Here (2B).
-	log.Infof("send msg???")
+	//todo
+	dat, err := msg.Marshal()
+	if err != nil {
+		panic(err)
+	}
+	if err = d.RaftGroup.Propose(dat); err != nil {
+		panic(err)
+	}
 
 }
 
