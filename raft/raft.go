@@ -361,7 +361,7 @@ func (r *Raft) becomeCandidate() {
 	r.votes[r.id] = true
 	r.electionElapsed = 0
 
-	//log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
+	log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
 }
 
 // becomeLeader transform this peer's state to leader
@@ -391,7 +391,7 @@ func (r *Raft) becomeLeader() {
 	r.Prs[r.id].Match = uint64(len(r.RaftLog.entries))
 	r.Prs[r.id].Next = uint64(len(r.RaftLog.entries)) + 1
 
-	//log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
+	log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
 }
 
 func (r *Raft) bcastAppend() {
