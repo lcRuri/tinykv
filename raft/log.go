@@ -67,14 +67,13 @@ type RaftLog struct {
 func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
 	//从storage中取出消息
-	state, _, _ := storage.InitialState()
 	firstIndex, _ := storage.FirstIndex()
 	lastIndex, _ := storage.LastIndex()
 	entries, _ := storage.Entries(firstIndex, lastIndex+1)
 
 	raftLog := &RaftLog{
 		storage:   storage,
-		committed: state.Commit,
+		committed: firstIndex - 1,
 
 		applied: firstIndex - 1,
 		stabled: lastIndex,
@@ -146,10 +145,11 @@ func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 func (l *RaftLog) LastIndex() uint64 {
 	// Your Code Here (2A).
 	if len(l.entries) != 0 {
-		return uint64(len(l.entries))
+		return l.entries[len(l.entries)-1].Index
 	}
 
-	return l.stabled
+	lastIndex, _ := l.storage.LastIndex()
+	return lastIndex
 }
 
 // Term return the term of the entry in the given index

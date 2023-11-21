@@ -265,10 +265,11 @@ func (r *Raft) sendHeartbeat(to uint64) {
 
 	//todo 关于含有日志的候选者要成为leader 关于LogTerm和Index设置
 	msg := pb.Message{
-		To:     to,
-		From:   r.id,
-		Term:   r.Term,
-		Commit: r.RaftLog.committed,
+		MsgType: pb.MessageType_MsgHeartbeat,
+		To:      to,
+		From:    r.id,
+		Term:    r.Term,
+		Commit:  r.RaftLog.committed,
 	}
 
 	//获取peer的匹配日志
@@ -276,7 +277,10 @@ func (r *Raft) sendHeartbeat(to uint64) {
 	if msg.Index == 0 {
 		msg.LogTerm = 0
 	} else {
-		msg.LogTerm = r.RaftLog.entries[msg.Index-1].Term
+		if msg.Index-1 >= uint64(len(r.RaftLog.entries)) || msg.Index-1 < 0 {
+
+		}
+		msg.LogTerm = r.RaftLog.entries[msg.Index-1-r.RaftLog.stabled].Term
 	}
 
 	//根据角色的不同设置msg的type
@@ -423,14 +427,13 @@ func (r *Raft) Step(m pb.Message) error {
 				} else {
 					//todo 区别是否已经有了日志
 					r.sendHeartbeat(peer)
-					//log.Infof("raft:%d send msg to raft:%d", r.id, peer)
+					//fof("raft:%d send msg to raft:%d", r.id, peer)
 				}
 			}
 		}
 
 		//处理心跳或者请求投票
 		if m.MsgType == pb.MessageType_MsgHeartbeat || m.MsgType == pb.MessageType_MsgRequestVote {
-			//log.Infof("raft:%d receive msg from raft:%d,msgtype:%d", r.id, m.From, m.MsgType)
 			r.handleHeartbeat(m)
 		}
 
@@ -503,7 +506,7 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 
 		if m.MsgType == pb.MessageType_MsgHeartbeatResponse {
-			r.sendAppend(m.From)
+			r.handleHeartbeat(m)
 		}
 
 		if m.MsgType == pb.MessageType_MsgAppend {
@@ -578,7 +581,9 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 }
 
 func (r *Raft) maybeCommit(newCommited uint64) bool {
-	if newCommited > r.RaftLog.committed && r.RaftLog.entries[newCommited-1].Term == r.Term {
+	if newCommited-1 >= uint64(len(r.RaftLog.entries)) || newCommited-1 < 0 {
+	}
+	if newCommited > r.RaftLog.committed && newCommited > r.RaftLog.stabled && r.RaftLog.entries[newCommited-1].Term == r.Term {
 		r.changeCommited(newCommited)
 		return true
 	}
@@ -634,7 +639,12 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 			msg.Reject = true
 		//在冲突的位置截断之前的日志
 		default:
+			//todo
+			//if len(r.RaftLog.entries) > int(PreIndex-1) {
 			r.RaftLog.entries = r.RaftLog.entries[:int(PreIndex-1)]
+			//} else {
+			//	r.RaftLog.entries = r.RaftLog.entries[:int(PreIndex-1-r.RaftLog.stabled)]
+			//}
 
 			m.Entries = m.Entries[entriesIndex:]
 			//截断的位置影响了stabled 就需要更改stabled
@@ -730,12 +740,22 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 					From:    r.id,
 					Term:    r.Term,
 					Commit:  r.RaftLog.committed,
+					Index:   r.RaftLog.LastIndex(),
 				}
 
 				r.msgs = append(r.msgs, msg)
 			}
 
 		}
+	case pb.MessageType_MsgHeartbeatResponse:
+		if r.State != StateLeader {
+			return
+		}
+
+		r.Prs[m.From].Match = m.Index
+		r.Prs[m.From].Next = m.Index + 1
+
+		r.sendAppend(m.From)
 	}
 }
 
