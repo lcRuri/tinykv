@@ -46,6 +46,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 	//todo
 	ready := d.RaftGroup.Ready()
 	if d.RaftGroup.HasReady() {
+		//log.Infof("!d.RaftGroup.HasReady()")
 		d.peerStorage.SaveReadyState(&ready)
 	} else {
 		d.Send(d.ctx.trans, ready.Messages)
@@ -57,6 +58,7 @@ func (d *peerMsgHandler) HandleMsg(msg message.Msg) {
 	switch msg.Type {
 	case message.MsgTypeRaftMessage:
 		raftMsg := msg.Data.(*rspb.RaftMessage)
+		//fmt.Println("d.onRaftMsg()", raftMsg.Message.MsgType, "from", raftMsg.Message.From, "to", raftMsg.Message.To)
 		if err := d.onRaftMsg(raftMsg); err != nil {
 			log.Errorf("%s handle raft message error %v", d.Tag, err)
 		}
@@ -122,6 +124,24 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 		cb.Done(ErrResp(err))
 		return
 	}
+
+	//if msg.AdminRequest == nil {
+	//	dAtA, _ := msg.Requests[0].Marshal()
+	//	key := dAtA
+	//	if key != nil {
+	//		if err := util.CheckKeyInRegion(key, d.Region()); err != nil {
+	//			cb.Done(ErrResp(err))
+	//			return
+	//		}
+	//	}
+	//
+	//	d.proposals = append(d.proposals, &proposal{
+	//		index: d.nextProposalIndex(),
+	//		term:  d.Term(),
+	//		cb:    cb,
+	//	})
+	//}
+
 	// Your Code Here (2B).
 	//todo
 	dat, err := msg.Marshal()
