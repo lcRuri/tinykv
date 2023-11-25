@@ -70,7 +70,7 @@ func newLog(storage Storage) *RaftLog {
 	//从storage中取出消息
 	firstIndex, _ := storage.FirstIndex()
 	lastIndex, _ := storage.LastIndex()
-	entries, _ := storage.Entries(firstIndex, lastIndex+1)
+	//entries, _ := storage.Entries(firstIndex, lastIndex+1)
 	hardState, _, _ := storage.InitialState()
 
 	raftLog := &RaftLog{
@@ -79,7 +79,6 @@ func newLog(storage Storage) *RaftLog {
 
 		applied: firstIndex - 1,
 		stabled: lastIndex,
-		entries: entries,
 	}
 
 	return raftLog
@@ -97,7 +96,22 @@ func (l *RaftLog) maybeCompact() {
 // note, this is one of the test stub functions you need to implement.
 func (l *RaftLog) allEntries() []pb.Entry {
 	// Your Code Here (2A).
-	return l.entries
+	// l.storage+l.entries
+	firstIndex, err := l.storage.FirstIndex()
+	if err != nil {
+		panic(err)
+	}
+	lastIndex, err := l.storage.LastIndex()
+	if err != nil {
+		panic(err)
+	}
+	Entries, err := l.storage.Entries(firstIndex, lastIndex+1)
+
+	if err != nil {
+		panic(err)
+	}
+	Entries = append(Entries, l.entries...)
+	return Entries
 }
 
 // unstableEntries return all the unstable entries
@@ -156,7 +170,7 @@ func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
 	// 判断index的范围
 	if i < 1 {
-		return 0, errors.Errorf("%d < 1", i)
+		return 0, nil
 	}
 
 	lastIndex := l.LastIndex()

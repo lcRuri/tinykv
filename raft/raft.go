@@ -16,7 +16,6 @@ package raft
 
 import (
 	"errors"
-	"fmt"
 	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"math/rand"
@@ -284,7 +283,7 @@ func (r *Raft) sendHeartbeat(to uint64) {
 			msg.LogTerm = 0
 		} else {
 			if msg.Index-1 >= uint64(len(r.RaftLog.entries)) || msg.Index-1 < 0 {
-				fmt.Println("msg.Index", msg.Index, r.State, r.RaftLog.stabled)
+				//fmt.Println("msg.Index", msg.Index, r.State, r.RaftLog.stabled)
 			}
 
 			msg.LogTerm = r.RaftLog.entries[msg.Index-1].Term
@@ -387,18 +386,17 @@ func (r *Raft) becomeLeader() {
 
 	//发送一条空的ents消息 截断之前的消息 leader只能处理自己任期的消息
 	r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Term: r.Term, Index: r.RaftLog.LastIndex() + 1})
-	//r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{})
 	if len(r.peers) == 1 {
 		r.RaftLog.committed++
 	}
 	r.Prs[r.id].Match = r.RaftLog.LastIndex()
 	r.Prs[r.id].Next = r.RaftLog.LastIndex() + 1
 
-	log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
-	log.Info("raft log stabled:", r.RaftLog.stabled, "raft log commited:", r.RaftLog.committed, "raft log len entries", len(r.RaftLog.entries), "lastIndex", r.RaftLog.LastIndex())
-	for i := 0; i < len(r.peers); i++ {
-		log.Info("id:", r.peers[i], "match:", r.Prs[r.peers[i]].Match, "next:", r.Prs[r.peers[i]].Next)
-	}
+	//log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
+	//log.Info("raft log stabled:", r.RaftLog.stabled, "raft log commited:", r.RaftLog.committed, "raft log len entries", len(r.RaftLog.entries), "lastIndex", r.RaftLog.LastIndex())
+	//for i := 0; i < len(r.peers); i++ {
+	//	log.Info("id:", r.peers[i], "match:", r.Prs[r.peers[i]].Match, "next:", r.Prs[r.peers[i]].Next)
+	//}
 }
 
 func (r *Raft) bcastAppend() {
@@ -493,7 +491,7 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 
 		if m.MsgType == pb.MessageType_MsgAppend {
-			fmt.Println("append candidate")
+			//fmt.Println("append candidate")
 			r.handleAppendEntries(m)
 		}
 
@@ -522,7 +520,7 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 
 		if m.MsgType == pb.MessageType_MsgAppend {
-			fmt.Println("append")
+			//fmt.Println("append")
 			r.handleAppendEntries(m)
 		}
 
@@ -568,7 +566,7 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 		r.State = StateFollower
 		r.Term = m.Term
 	} else if m.Reject == true {
-		fmt.Println("from:", m.From, "reject")
+		//fmt.Println("from:", m.From, "reject")
 		if r.Prs[m.From].Match-1 < r.RaftLog.stabled {
 
 		} else {
@@ -581,7 +579,7 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 		r.Prs[m.From].Match = m.Index
 		r.Prs[m.From].Next = m.Index + 1
 		if m.Index > 1000 {
-			fmt.Println("big from ", m.From)
+			//fmt.Println("big from ", m.From)
 		}
 		//todo 只能提交自己任期内的日志
 
@@ -624,7 +622,7 @@ func (r *Raft) maybeCommit(newCommited uint64) bool {
 }
 
 func (r *Raft) changeCommited(commited uint64) {
-	fmt.Println("change to ", commited)
+	//fmt.Println("change to ", commited)
 	r.RaftLog.committed = commited
 }
 
@@ -636,17 +634,15 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	//If AppendEntries RPC received from new leader: convert to follower
 	r.heartbeatTimeout = 0
 	msg := pb.Message{MsgType: pb.MessageType_MsgAppendResponse, From: r.id, To: m.From, Index: m.Index, Term: r.Term}
-	if m.Index < r.RaftLog.committed {
-		// 传入的消息索引是已经commit过的索引
-		// 返回commit日志索引
-		//fmt.Println("committed:", r.RaftLog.committed, "m.Index:", m.Index)
+
+	if m.Index > r.RaftLog.LastIndex() {
+		msg.Reject = true
 		r.msgs = append(r.msgs, msg)
 		return
 	}
 	term, err := r.RaftLog.Term(m.Index)
 	if err != nil {
 		log.Error(err)
-		panic(err)
 		msg.Reject = true
 		r.msgs = append(r.msgs, msg)
 		return
@@ -657,12 +653,12 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		r.Lead = m.From
 		r.State = StateFollower
 
-		//查找具体是在哪个位置匹配的
+		//查找具体是在哪个位置匹配的 todo
 		var PreIndex uint64
 		var entriesIndex int
+		var PreTerm uint64 = 0
 		for i, entry := range m.Entries {
 			lastIndex := r.RaftLog.LastIndex()
-			var PreTerm uint64 = 0
 
 			if entry.Index <= lastIndex {
 				PreTerm, err = r.RaftLog.Term(entry.Index)
@@ -680,7 +676,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 			}
 		}
 
-		//fmt.Println("PreIndex:", PreIndex, "commited:", r.RaftLog.committed, "len entries", len(r.RaftLog.entries), "len m entries:", len(m.Entries))
+		//fmt.Println("PreIndex:", PreIndex, "commited:", r.RaftLog.committed, "len entries", len(r.RaftLog.entries), "len m entries:", len(m.Entries), "stabled:", r.RaftLog.stabled, "m.Index:", m.Index, "preTerm:", PreTerm)
 		//判断PreIndex的情况
 		switch {
 		//不存在冲突
@@ -690,21 +686,19 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 			msg.Reject = true
 		//在冲突的位置截断之前的日志
 		default:
-			//todo
-			//if len(r.RaftLog.entries) > int(PreIndex-1) {
-			r.RaftLog.entries = r.RaftLog.entries[:int(PreIndex-1-r.RaftLog.stabled)]
-			//} else {
-			//	//	r.RaftLog.entries = r.RaftLog.entries[:int(PreIndex-1-r.RaftLog.stabled)]
-			//}
-
+			//todo storage 和 entries
+			if int(PreIndex)-int(r.RaftLog.stabled) > 0 {
+				r.RaftLog.entries = r.RaftLog.entries[:int(PreIndex-1-r.RaftLog.stabled)]
+			}
 			m.Entries = m.Entries[entriesIndex:]
+
 			//截断的位置影响了stabled 就需要更改stabled
 			if r.RaftLog.stabled > PreIndex-1 {
 				r.RaftLog.stabled = PreIndex - 1
 			}
+
 			for _, entry := range m.Entries {
 				r.RaftLog.entries = append(r.RaftLog.entries, *entry)
-
 			}
 
 			for _, peer := range r.peers {
@@ -724,7 +718,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 			r.RaftLog.committed = min(lastnewi, m.Commit)
 		}
 	} else {
-		fmt.Println("id:", r.id, "reject ", "m.term:", m.Term, "r.term:", r.Term, "term:", term, "m.logTerm:", m.LogTerm, "m.index", m.Index)
+		//Println("id:", r.id, "reject ", "m.term:", m.Term, "r.term:", r.Term, "term:", term, "m.logTerm:", m.LogTerm, "m.index", m.Index)
 		msg.Reject = true
 	}
 
