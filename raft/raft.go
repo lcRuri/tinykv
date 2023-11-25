@@ -235,8 +235,10 @@ func (r *Raft) sendAppend(to uint64) bool {
 
 	//起始是leader的Prs里面存储的当前peer的下一条日志的位置
 	entries := make([]*pb.Entry, 0)
-	for i := r.Prs[to].Match; i < uint64(len(r.RaftLog.entries)); i++ {
-		entries = append(entries, &r.RaftLog.entries[i])
+	for i := 0; i < len(r.RaftLog.entries); i++ {
+		if r.Prs[to].Match < r.RaftLog.entries[i].Index {
+			entries = append(entries, &r.RaftLog.entries[i])
+		}
 	}
 
 	term, err := r.RaftLog.Term(r.Prs[to].Match)
@@ -255,6 +257,7 @@ func (r *Raft) sendAppend(to uint64) bool {
 	}
 
 	r.msgs = append(r.msgs, msg)
+	//fmt.Println("r.Prs[to].Match:", r.Prs[to].Match, "len(r.RaftLog.entries):", len(r.RaftLog.entries), "id ", r.id, "send to ", to, "len:", len(entries), "msg.Index:", msg.Index)
 
 	return true
 }
@@ -388,10 +391,14 @@ func (r *Raft) becomeLeader() {
 	if len(r.peers) == 1 {
 		r.RaftLog.committed++
 	}
-	r.Prs[r.id].Match = uint64(len(r.RaftLog.entries))
-	r.Prs[r.id].Next = uint64(len(r.RaftLog.entries)) + 1
+	r.Prs[r.id].Match = r.RaftLog.LastIndex()
+	r.Prs[r.id].Next = r.RaftLog.LastIndex() + 1
 
 	log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
+	log.Info("raft log stabled:", r.RaftLog.stabled, "raft log commited:", r.RaftLog.committed, "raft log len entries", len(r.RaftLog.entries), "lastIndex", r.RaftLog.LastIndex())
+	for i := 0; i < len(r.peers); i++ {
+		log.Info("id:", r.peers[i], "match:", r.Prs[r.peers[i]].Match, "next:", r.Prs[r.peers[i]].Next)
+	}
 }
 
 func (r *Raft) bcastAppend() {
@@ -438,7 +445,7 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 
 		if m.MsgType == pb.MessageType_MsgAppend {
-			fmt.Println("append follower", "r.id", r.id)
+			//fmt.Println("append follower", "r.id", r.id)
 			r.handleAppendEntries(m)
 		}
 	case StateCandidate:
@@ -499,8 +506,9 @@ func (r *Raft) Step(m pb.Message) error {
 				if peer == r.id {
 					continue
 				} else {
-					fmt.Println("send heart")
+					//fmt.Println("send heart")
 					r.sendHeartbeat(peer)
+					//fmt.Println("done")
 				}
 			}
 		}
@@ -519,7 +527,7 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 
 		if m.MsgType == pb.MessageType_MsgPropose {
-			fmt.Println("propose")
+			//fmt.Println("propose", "len m.entries", len(m.Entries))
 			//将msg保存到leader本地
 			for _, e := range m.Entries {
 				entry := pb.Entry{
@@ -560,20 +568,37 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 		r.State = StateFollower
 		r.Term = m.Term
 	} else if m.Reject == true {
-		r.Prs[m.From].Match--
-		r.Prs[m.From].Next--
+		fmt.Println("from:", m.From, "reject")
+		if r.Prs[m.From].Match-1 < r.RaftLog.stabled {
+
+		} else {
+			r.Prs[m.From].Match--
+			r.Prs[m.From].Next--
+		}
+
 	} else if m.Reject == false {
 
 		r.Prs[m.From].Match = m.Index
 		r.Prs[m.From].Next = m.Index + 1
-
+		if m.Index > 1000 {
+			fmt.Println("big from ", m.From)
+		}
 		//todo 只能提交自己任期内的日志
-		//fmt.Println("from", m.From)
+
 		//找到match的中位数更新commit
 		matchInts := make([]uint64, 0)
-		for _, progress := range r.Prs {
-			matchInts = append(matchInts, progress.Match)
+
+		for i := 0; i < len(r.peers); i++ {
+			matchInts = append(matchInts, r.Prs[r.peers[i]].Match)
 		}
+		//for id, progress := range r.Prs {
+		//	matchInts = append(matchInts, progress.Match)
+		//	if progress.Match > 1000 {
+		//		fmt.Println("r.id", id)
+		//	}
+		//}
+
+		//fmt.Println(matchInts)
 		sort.Slice(matchInts, func(i, j int) bool {
 			return matchInts[i] < matchInts[j]
 		})
@@ -587,10 +612,10 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 
 func (r *Raft) maybeCommit(newCommited uint64) bool {
 	if newCommited-1 >= uint64(len(r.RaftLog.entries)) {
-		fmt.Println("new ", newCommited, len(r.RaftLog.entries), "r.id", r.id, "state", r.State, "commited", r.RaftLog.committed, "stabled", r.RaftLog.stabled)
+		//fmt.Println("new ", newCommited, len(r.RaftLog.entries), "r.id", r.id, "state", r.State, "commited", r.RaftLog.committed, "stabled", r.RaftLog.stabled)
 	}
 	if newCommited > r.RaftLog.committed && newCommited > r.RaftLog.stabled && r.RaftLog.entries[newCommited-1-r.RaftLog.stabled].Term == r.Term {
-		fmt.Println("change")
+		//fmt.Println("change", "newCommited", newCommited, " r.RaftLog.committed", r.RaftLog.committed)
 		r.changeCommited(newCommited)
 		return true
 	}
@@ -611,9 +636,17 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	//If AppendEntries RPC received from new leader: convert to follower
 	r.heartbeatTimeout = 0
 	msg := pb.Message{MsgType: pb.MessageType_MsgAppendResponse, From: r.id, To: m.From, Index: m.Index, Term: r.Term}
+	if m.Index < r.RaftLog.committed {
+		// 传入的消息索引是已经commit过的索引
+		// 返回commit日志索引
+		//fmt.Println("committed:", r.RaftLog.committed, "m.Index:", m.Index)
+		r.msgs = append(r.msgs, msg)
+		return
+	}
 	term, err := r.RaftLog.Term(m.Index)
 	if err != nil {
-		log.Error("the logTerm not match index\n")
+		log.Error(err)
+		panic(err)
 		msg.Reject = true
 		r.msgs = append(r.msgs, msg)
 		return
@@ -628,10 +661,18 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		var PreIndex uint64
 		var entriesIndex int
 		for i, entry := range m.Entries {
-			PreTerm, err := r.RaftLog.Term(entry.Index)
-			if err != nil {
-				log.Error("the logTerm not match index\n")
+			lastIndex := r.RaftLog.LastIndex()
+			var PreTerm uint64 = 0
+
+			if entry.Index <= lastIndex {
+				PreTerm, err = r.RaftLog.Term(entry.Index)
+				if err != nil {
+					log.Error(err)
+					panic(err)
+				}
 			}
+
+			//fmt.Println("PreTerm:", PreTerm, "entry.Index:", entry.Index)
 			if PreTerm != entry.Term {
 				PreIndex = entry.Index
 				entriesIndex = i
@@ -639,6 +680,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 			}
 		}
 
+		//fmt.Println("PreIndex:", PreIndex, "commited:", r.RaftLog.committed, "len entries", len(r.RaftLog.entries), "len m entries:", len(m.Entries))
 		//判断PreIndex的情况
 		switch {
 		//不存在冲突
@@ -662,6 +704,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 			}
 			for _, entry := range m.Entries {
 				r.RaftLog.entries = append(r.RaftLog.entries, *entry)
+
 			}
 
 			for _, peer := range r.peers {
@@ -681,6 +724,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 			r.RaftLog.committed = min(lastnewi, m.Commit)
 		}
 	} else {
+		fmt.Println("id:", r.id, "reject ", "m.term:", m.Term, "r.term:", r.Term, "term:", term, "m.logTerm:", m.LogTerm, "m.index", m.Index)
 		msg.Reject = true
 	}
 
@@ -698,6 +742,8 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	}
 
 	r.msgs = append(r.msgs, msg)
+
+	//fmt.Println("id:", r.id, "raft log commit", r.RaftLog.committed, "raft log stabled", r.RaftLog.stabled, "msg index", msg.Index, "raft log lastIndex", r.RaftLog.LastIndex(), "len entries", len(r.RaftLog.entries))
 
 }
 

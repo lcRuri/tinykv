@@ -16,6 +16,7 @@ package raft
 
 import (
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+	"github.com/pkg/errors"
 )
 
 // RaftLog manage the log entries, its struct look like:
@@ -154,12 +155,26 @@ func (l *RaftLog) LastIndex() uint64 {
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
 	// 判断index的范围
-
-	if i < 1 || i > uint64(len(l.entries)) {
-		return 0, nil
+	if i < 1 {
+		return 0, errors.Errorf("%d < 1", i)
 	}
 
-	return l.entries[i-1].Term, nil
+	lastIndex := l.LastIndex()
+	//fmt.Println("i:", i, "lastIndex", lastIndex, "entries:", len(l.entries), "l.stabled:", l.stabled)
+	if i > lastIndex {
+		return 0, errors.Errorf("%d > lastIndex:%d", i, lastIndex)
+	}
+
+	if i <= l.stabled {
+		term, err := l.storage.Term(i)
+		if err != nil {
+			panic(err)
+		}
+
+		return term, nil
+	}
+
+	return l.entries[i-l.stabled-1].Term, nil
 }
 
 func (l *RaftLog) hasNextEnts() bool {
