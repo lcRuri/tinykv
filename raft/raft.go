@@ -395,7 +395,7 @@ func (r *Raft) becomeLeader() {
 	r.Prs[r.id].Match = r.RaftLog.LastIndex()
 	r.Prs[r.id].Next = r.RaftLog.LastIndex() + 1
 
-	log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
+	//log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
 	//log.Info("raft log stabled:", r.RaftLog.stabled, "raft log commited:", r.RaftLog.committed, "raft log len entries", len(r.RaftLog.entries), "lastIndex", r.RaftLog.LastIndex())
 	//for i := 0; i < len(r.peers); i++ {
 	//	log.Info("id:", r.peers[i], "match:", r.Prs[r.peers[i]].Match, "next:", r.Prs[r.peers[i]].Next)
@@ -532,7 +532,7 @@ func (r *Raft) Step(m pb.Message) error {
 
 		if m.MsgType == pb.MessageType_MsgPropose {
 			//fmt.Println("propose", "len m.entries", len(m.Entries))
-			log.Infof("raft:%d propose len m.entries:%d", r.id, len(m.Entries))
+			//log.Infof("raft:%d propose len m.entries:%d", r.id, len(m.Entries))
 			//将msg保存到leader本地
 			for _, e := range m.Entries {
 				entry := pb.Entry{
@@ -630,7 +630,7 @@ func (r *Raft) maybeCommit(newCommited uint64) bool {
 }
 
 func (r *Raft) changeCommited(commited uint64) {
-	log.Infof("r.id:%d committed change to %d", r.id, commited)
+	//log.Infof("r.id:%d committed change to %d", r.id, commited)
 	r.RaftLog.committed = commited
 }
 
@@ -674,6 +674,9 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 					log.Error(err)
 					panic(err)
 				}
+			} else {
+				PreIndex = entry.Index
+				break
 			}
 
 			//fmt.Println("PreTerm:", PreTerm, "entry.Index:", entry.Index)
@@ -726,7 +729,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 			lastnewi := uint64(len(r.RaftLog.entries)) + r.RaftLog.stabled //index of last new entry
 			//fmt.Println("lastnewi:", lastnewi, "len(m.Entries):", len(m.Entries), "m.commit:", m.Commit, "r.id:", r.id, "r.state:", r.State)
 			r.RaftLog.committed = min(lastnewi, m.Commit)
-			log.Infof("r.id:%d committed change to %d", r.id, min(lastnewi, m.Commit))
+			//log.Infof("r.id:%d committed change to %d", r.id, min(lastnewi, m.Commit))
 		}
 	} else {
 		//Println("id:", r.id, "reject ", "m.term:", m.Term, "r.term:", r.Term, "term:", term, "m.logTerm:", m.LogTerm, "m.index", m.Index)
@@ -774,6 +777,18 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 					m.Reject = true
 				} else if m.LogTerm == r.RaftLog.entries[len(r.RaftLog.entries)-1].Term {
 					if m.Index < r.RaftLog.entries[len(r.RaftLog.entries)-1].Index {
+						m.Reject = true
+					}
+				}
+			} else if r.RaftLog.stabled > 0 {
+				firstIndex, _ := r.RaftLog.storage.FirstIndex()
+				lastIndex, _ := r.RaftLog.storage.LastIndex()
+				term, _ := r.RaftLog.storage.Term(lastIndex)
+				entries, _ := r.RaftLog.storage.Entries(firstIndex, lastIndex+1)
+				if m.LogTerm < term {
+					m.Reject = true
+				} else if m.LogTerm == term {
+					if m.Index < entries[len(entries)-1].Index {
 						m.Reject = true
 					}
 				}
