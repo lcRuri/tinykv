@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"fmt"
 	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"math/rand"
@@ -350,6 +351,7 @@ func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	r.State = StateFollower
 	r.Term = term
 	r.Lead = lead
+	//log.Infof("raft:%d become follower at term:%d", r.id, r.Term)
 
 }
 
@@ -387,12 +389,13 @@ func (r *Raft) becomeLeader() {
 	//发送一条空的ents消息 截断之前的消息 leader只能处理自己任期的消息
 	r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Term: r.Term, Index: r.RaftLog.LastIndex() + 1})
 	if len(r.peers) == 1 {
+		fmt.Println("ddd")
 		r.RaftLog.committed++
 	}
 	r.Prs[r.id].Match = r.RaftLog.LastIndex()
 	r.Prs[r.id].Next = r.RaftLog.LastIndex() + 1
 
-	//log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
+	log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
 	//log.Info("raft log stabled:", r.RaftLog.stabled, "raft log commited:", r.RaftLog.committed, "raft log len entries", len(r.RaftLog.entries), "lastIndex", r.RaftLog.LastIndex())
 	//for i := 0; i < len(r.peers); i++ {
 	//	log.Info("id:", r.peers[i], "match:", r.Prs[r.peers[i]].Match, "next:", r.Prs[r.peers[i]].Next)
@@ -467,6 +470,9 @@ func (r *Raft) Step(m pb.Message) error {
 
 		if m.MsgType == pb.MessageType_MsgRequestVoteResponse {
 			//log.Infof("raft:%d receive resp from %d reject:%v", r.id, m.From, m.Reject)
+			if r.State != StateCandidate {
+				return nil
+			}
 			if m.Reject == false {
 				r.votes[m.From] = true
 
@@ -526,6 +532,7 @@ func (r *Raft) Step(m pb.Message) error {
 
 		if m.MsgType == pb.MessageType_MsgPropose {
 			//fmt.Println("propose", "len m.entries", len(m.Entries))
+			log.Infof("raft:%d propose len m.entries:%d", r.id, len(m.Entries))
 			//将msg保存到leader本地
 			for _, e := range m.Entries {
 				entry := pb.Entry{
@@ -538,6 +545,7 @@ func (r *Raft) Step(m pb.Message) error {
 				r.Prs[r.id].Match = r.RaftLog.LastIndex()
 				r.Prs[r.id].Next = r.RaftLog.LastIndex() + 1
 				if len(r.peers) == 1 {
+					fmt.Println("aaa")
 					r.RaftLog.committed++
 				}
 			}
@@ -567,7 +575,7 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 		r.Term = m.Term
 	} else if m.Reject == true {
 		//fmt.Println("from:", m.From, "reject")
-		if r.Prs[m.From].Match-1 < r.RaftLog.stabled {
+		if int(r.Prs[m.From].Match)-1 < int(r.RaftLog.stabled) {
 
 		} else {
 			r.Prs[m.From].Match--
@@ -601,7 +609,7 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 			return matchInts[i] < matchInts[j]
 		})
 
-		if r.maybeCommit(matchInts[(len(matchInts)-1)/2]) {
+		if r.maybeCommit(matchInts[(len(matchInts))/2]) {
 			r.bcastAppend()
 		}
 
@@ -622,7 +630,7 @@ func (r *Raft) maybeCommit(newCommited uint64) bool {
 }
 
 func (r *Raft) changeCommited(commited uint64) {
-	//fmt.Println("change to ", commited)
+	log.Infof("r.id:%d committed change to %d", r.id, commited)
 	r.RaftLog.committed = commited
 }
 
@@ -669,11 +677,11 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 			}
 
 			//fmt.Println("PreTerm:", PreTerm, "entry.Index:", entry.Index)
-			if PreTerm != entry.Term {
+			if PreTerm != entry.Term || (len(r.RaftLog.entries) > 0 && PreTerm == entry.Term && r.RaftLog.entries[PreIndex].Index != entry.Index) {
 				PreIndex = entry.Index
 				entriesIndex = i
-				break
 			}
+
 		}
 
 		//fmt.Println("PreIndex:", PreIndex, "commited:", r.RaftLog.committed, "len entries", len(r.RaftLog.entries), "len m entries:", len(m.Entries), "stabled:", r.RaftLog.stabled, "m.Index:", m.Index, "preTerm:", PreTerm)
@@ -682,11 +690,12 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		//不存在冲突
 		case PreIndex == 0:
 		//冲突的位置在已经提交的范围内 说明想要添加的日志有错 返回
-		case PreIndex <= r.RaftLog.committed:
+		case PreIndex+1 <= r.RaftLog.committed:
 			msg.Reject = true
 		//在冲突的位置截断之前的日志
 		default:
 			//todo storage 和 entries
+
 			if int(PreIndex)-int(r.RaftLog.stabled) > 0 {
 				r.RaftLog.entries = r.RaftLog.entries[:int(PreIndex-1-r.RaftLog.stabled)]
 			}
@@ -714,8 +723,10 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		//更新commited
 		if m.Commit > r.RaftLog.committed {
 			// commitIndex = min(leaderCommit, index of last new entry)
-			lastnewi := uint64(int(m.Index) + len(m.Entries)) //index of last new entry
+			lastnewi := uint64(len(r.RaftLog.entries)) + r.RaftLog.stabled //index of last new entry
+			//fmt.Println("lastnewi:", lastnewi, "len(m.Entries):", len(m.Entries), "m.commit:", m.Commit, "r.id:", r.id, "r.state:", r.State)
 			r.RaftLog.committed = min(lastnewi, m.Commit)
+			log.Infof("r.id:%d committed change to %d", r.id, min(lastnewi, m.Commit))
 		}
 	} else {
 		//Println("id:", r.id, "reject ", "m.term:", m.Term, "r.term:", r.Term, "term:", term, "m.logTerm:", m.LogTerm, "m.index", m.Index)
