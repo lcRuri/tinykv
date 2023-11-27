@@ -705,9 +705,9 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 			m.Entries = m.Entries[entriesIndex:]
 
 			//截断的位置影响了stabled 就需要更改stabled
-			if r.RaftLog.stabled > PreIndex-1 {
-				r.RaftLog.stabled = PreIndex - 1
-			}
+			//if r.RaftLog.stabled > PreIndex-1 {
+			//	r.RaftLog.stabled = PreIndex - 1
+			//}
 
 			for _, entry := range m.Entries {
 				r.RaftLog.entries = append(r.RaftLog.entries, *entry)
