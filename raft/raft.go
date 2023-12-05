@@ -16,7 +16,6 @@ package raft
 
 import (
 	"errors"
-	"fmt"
 	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"math/rand"
@@ -232,9 +231,17 @@ func (r *Raft) sendAppend(to uint64) bool {
 	if r.State != StateLeader {
 		return false
 	}
-
-	//起始是leader的Prs里面存储的当前peer的下一条日志的位置
 	entries := make([]*pb.Entry, 0)
+	//todo
+	//起始是leader的Prs里面存储的当前peer的下一条日志的位置
+	if r.Prs[to].Match < r.RaftLog.stabled {
+		lastIndex, _ := r.RaftLog.storage.LastIndex()
+		e, _ := r.RaftLog.storage.Entries(r.Prs[to].Next, min(lastIndex+1, r.RaftLog.stabled))
+		for _, entry := range e {
+			entries = append(entries, &entry)
+		}
+	}
+
 	for i := 0; i < len(r.RaftLog.entries); i++ {
 		if r.Prs[to].Match < r.RaftLog.entries[i].Index {
 			entries = append(entries, &r.RaftLog.entries[i])
@@ -378,10 +385,11 @@ func (r *Raft) becomeLeader() {
 	r.Lead = r.id
 	//设置nextInts和matchInts
 	// todo match是entries的下标 next为啥这么设置
+	index := r.RaftLog.LastIndex()
 	for _, peer := range r.peers {
 		p := &Progress{
-			Match: 0 + r.RaftLog.stabled,
-			Next:  r.RaftLog.stabled + 1,
+			Match: index,
+			Next:  index + 1,
 		}
 		r.Prs[peer] = p
 	}
@@ -389,7 +397,6 @@ func (r *Raft) becomeLeader() {
 	//发送一条空的ents消息 截断之前的消息 leader只能处理自己任期的消息
 	r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Term: r.Term, Index: r.RaftLog.LastIndex() + 1})
 	if len(r.peers) == 1 {
-		fmt.Println("ddd")
 		r.RaftLog.committed++
 	}
 	r.Prs[r.id].Match = r.RaftLog.LastIndex()
@@ -545,7 +552,7 @@ func (r *Raft) Step(m pb.Message) error {
 				r.Prs[r.id].Match = r.RaftLog.LastIndex()
 				r.Prs[r.id].Next = r.RaftLog.LastIndex() + 1
 				if len(r.peers) == 1 {
-					fmt.Println("aaa")
+					//fmt.Println("aaa")
 					r.RaftLog.committed++
 				}
 			}
@@ -575,12 +582,14 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 		r.Term = m.Term
 	} else if m.Reject == true {
 		//fmt.Println("from:", m.From, "reject")
-		if int(r.Prs[m.From].Match)-1 < int(r.RaftLog.stabled) {
+		if int(r.Prs[m.From].Match)-1 < 0 {
 
 		} else {
 			r.Prs[m.From].Match--
 			r.Prs[m.From].Next--
 		}
+
+		r.sendAppend(m.From)
 
 	} else if m.Reject == false {
 
@@ -609,7 +618,7 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 			return matchInts[i] < matchInts[j]
 		})
 
-		if r.maybeCommit(matchInts[(len(matchInts))/2]) {
+		if r.maybeCommit(matchInts[(len(matchInts)-1)/2]) {
 			r.bcastAppend()
 		}
 
@@ -620,7 +629,22 @@ func (r *Raft) maybeCommit(newCommited uint64) bool {
 	if newCommited-1 >= uint64(len(r.RaftLog.entries)) {
 		//fmt.Println("new ", newCommited, len(r.RaftLog.entries), "r.id", r.id, "state", r.State, "commited", r.RaftLog.committed, "stabled", r.RaftLog.stabled)
 	}
-	if newCommited > r.RaftLog.committed && newCommited > r.RaftLog.stabled && r.RaftLog.entries[newCommited-1-r.RaftLog.stabled].Term == r.Term {
+
+	term, _ := r.RaftLog.Term(newCommited)
+
+	if newCommited > r.RaftLog.committed && term == r.Term {
+		//if r.RaftLog.stabled > 0 {
+		//	firstIndex, _ := r.RaftLog.storage.FirstIndex()
+		//	lastIndex, _ := r.RaftLog.storage.LastIndex()
+		//	entries, _ := r.RaftLog.storage.Entries(firstIndex, lastIndex+1)
+		//	entries = append(entries, r.RaftLog.entries...)
+		//
+		//	for i := int(r.RaftLog.committed); i < len(entries); i++ {
+		//		if entries[i].Term != r.Term {
+		//			return false
+		//		}
+		//	}
+		//}
 		//fmt.Println("change", "newCommited", newCommited, " r.RaftLog.committed", r.RaftLog.committed)
 		r.changeCommited(newCommited)
 		return true
@@ -643,11 +667,12 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	r.heartbeatTimeout = 0
 	msg := pb.Message{MsgType: pb.MessageType_MsgAppendResponse, From: r.id, To: m.From, Index: m.Index, Term: r.Term}
 
-	if m.Index > r.RaftLog.LastIndex() {
-		msg.Reject = true
-		r.msgs = append(r.msgs, msg)
-		return
-	}
+	//if m.Index > r.RaftLog.LastIndex() {
+	//	msg.Reject = true
+	//	r.msgs = append(r.msgs, msg)
+	//	return
+	//}
+
 	term, err := r.RaftLog.Term(m.Index)
 	if err != nil {
 		log.Error(err)
@@ -675,7 +700,9 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 					panic(err)
 				}
 			} else {
-				PreIndex = entry.Index
+				if PreIndex == 0 {
+					PreIndex = entry.Index
+				}
 				break
 			}
 
@@ -699,8 +726,8 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		default:
 			//todo storage 和 entries
 
-			if int(PreIndex)-int(r.RaftLog.stabled) > 0 {
-				r.RaftLog.entries = r.RaftLog.entries[:int(PreIndex-1-r.RaftLog.stabled)]
+			if int(PreIndex)-int(r.RaftLog.stabled) > 0 && int(PreIndex-r.RaftLog.stabled) <= len(r.RaftLog.entries) {
+				r.RaftLog.entries = r.RaftLog.entries[:int(PreIndex-r.RaftLog.stabled)]
 			}
 			m.Entries = m.Entries[entriesIndex:]
 
@@ -780,7 +807,7 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 						m.Reject = true
 					}
 				}
-			} else if r.RaftLog.stabled > 0 {
+			} else if r.RaftLog.stabled > 1 {
 				firstIndex, _ := r.RaftLog.storage.FirstIndex()
 				lastIndex, _ := r.RaftLog.storage.LastIndex()
 				term, _ := r.RaftLog.storage.Term(lastIndex)
