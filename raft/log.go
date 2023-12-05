@@ -16,7 +16,6 @@ package raft
 
 import (
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
-	"github.com/pkg/errors"
 )
 
 // RaftLog manage the log entries, its struct look like:
@@ -78,7 +77,7 @@ func newLog(storage Storage) *RaftLog {
 		committed: hardState.Commit,
 
 		applied: firstIndex - 1,
-		stabled: lastIndex,
+		stabled: lastIndex + 1,
 	}
 
 	return raftLog
@@ -97,6 +96,7 @@ func (l *RaftLog) maybeCompact() {
 func (l *RaftLog) allEntries() []pb.Entry {
 	// Your Code Here (2A).
 	// l.storage+l.entries
+	// 判断firstIndex和stabled大小
 	firstIndex, err := l.storage.FirstIndex()
 	if err != nil {
 		panic(err)
@@ -110,6 +110,21 @@ func (l *RaftLog) allEntries() []pb.Entry {
 	if err != nil {
 		panic(err)
 	}
+
+	if firstIndex <= l.stabled && len(l.entries) > 0 {
+		var truncateIndex = int(lastIndex)
+		index := l.entries[0].Index
+
+		for i := len(Entries) - 1; i >= 0; i-- {
+			if Entries[i].Index >= index {
+				truncateIndex = i
+			}
+		}
+
+		l.stabled = uint64(truncateIndex)
+		Entries = Entries[:truncateIndex]
+	}
+
 	Entries = append(Entries, l.entries...)
 	return Entries
 }
@@ -118,18 +133,20 @@ func (l *RaftLog) allEntries() []pb.Entry {
 func (l *RaftLog) unstableEntries() []pb.Entry {
 	// Your Code Here (2A).
 
-	if len(l.entries) == 0 {
-		return []pb.Entry{}
-	}
-
-	var index = len(l.entries)
-	for i, entry := range l.entries {
-		if entry.Index > l.stabled {
-			index = i
-			break
+	//stabled稳定的是指下标
+	ents := make([]pb.Entry, 0)
+	for _, entry := range l.entries {
+		if entry.Index >= l.stabled {
+			ents = append(ents, entry)
 		}
 	}
-	return l.entries[index:]
+	return ents
+
+	//if len(l.entries) == 0 {
+	//	return nil
+	//}
+	//
+	//return l.entries
 }
 
 // nextEnts returns all the committed but not applied entries
@@ -137,17 +154,32 @@ func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
 	//todo
 
-	var index int
-	for i, entry := range l.entries {
-		if entry.Index > l.stabled {
-			index = i
-			break
-		}
-	}
+	var partition uint64
 	if int(l.committed) > len(l.entries) {
+		//说明有一部分日志在storage中
+		//全部取出 和applied和commited比较大小
+		firstIndex, _ := l.storage.FirstIndex()
+		lastIndex, _ := l.storage.LastIndex()
+		entries, _ := l.storage.Entries(firstIndex, lastIndex+1)
+
+		for _, entry := range entries {
+			if entry.Index > l.applied && entry.Index < l.committed {
+				ents = append(ents, entry)
+				partition = entry.Index
+			}
+		}
+
+		//找到entries中提交了但是未applied的日志的索引
+		var index int
+		for i, entry := range l.entries {
+			if entry.Index > partition {
+				index = i
+				break
+			}
+		}
 		ents = append(ents, l.entries[index:]...)
 	} else {
-		ents = append(ents, l.entries[index:l.committed]...)
+		ents = append(ents, l.entries[l.applied:l.committed]...)
 	}
 	return ents
 
@@ -176,10 +208,10 @@ func (l *RaftLog) Term(i uint64) (uint64, error) {
 	lastIndex := l.LastIndex()
 	//fmt.Println("i:", i, "lastIndex", lastIndex, "entries:", len(l.entries), "l.stabled:", l.stabled)
 	if i > lastIndex {
-		return 0, errors.Errorf("%d > lastIndex:%d", i, lastIndex)
+		return 0, nil
 	}
 
-	if i <= l.stabled {
+	if i < l.stabled {
 		term, err := l.storage.Term(i)
 		if err != nil {
 			panic(err)
@@ -188,7 +220,7 @@ func (l *RaftLog) Term(i uint64) (uint64, error) {
 		return term, nil
 	}
 
-	return l.entries[i-l.stabled-1].Term, nil
+	return l.entries[i-l.stabled].Term, nil
 }
 
 func (l *RaftLog) hasNextEnts() bool {
