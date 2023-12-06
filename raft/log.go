@@ -77,7 +77,7 @@ func newLog(storage Storage) *RaftLog {
 		committed: hardState.Commit,
 
 		applied: firstIndex - 1,
-		stabled: lastIndex + 1,
+		stabled: lastIndex,
 	}
 
 	return raftLog
@@ -136,7 +136,7 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 	//stabled稳定的是指下标
 	ents := make([]pb.Entry, 0)
 	for _, entry := range l.entries {
-		if entry.Index >= l.stabled {
+		if entry.Index > l.stabled {
 			ents = append(ents, entry)
 		}
 	}
@@ -211,16 +211,18 @@ func (l *RaftLog) Term(i uint64) (uint64, error) {
 		return 0, nil
 	}
 
-	if i < l.stabled {
-		term, err := l.storage.Term(i)
-		if err != nil {
-			panic(err)
-		}
-
-		return term, nil
+	index := i - l.stabled - 1
+	if index < uint64(len(l.entries)) {
+		return l.entries[i-l.stabled-1].Term, nil
 	}
 
-	return l.entries[i-l.stabled].Term, nil
+	term, err := l.storage.Term(i)
+	if err != nil {
+		panic(err)
+	}
+
+	return term, nil
+
 }
 
 func (l *RaftLog) hasNextEnts() bool {

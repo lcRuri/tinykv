@@ -232,13 +232,16 @@ func (r *Raft) sendAppend(to uint64) bool {
 		return false
 	}
 	entries := make([]*pb.Entry, 0)
-	//todo
+	//todo 12.6 添加在storage中的日志 根据next来选择
 	//起始是leader的Prs里面存储的当前peer的下一条日志的位置
-	if r.Prs[to].Match < r.RaftLog.stabled {
+	if r.Prs[to].Next <= r.RaftLog.stabled {
 		lastIndex, _ := r.RaftLog.storage.LastIndex()
-		e, _ := r.RaftLog.storage.Entries(r.Prs[to].Next, min(lastIndex+1, r.RaftLog.stabled))
-		for _, entry := range e {
-			entries = append(entries, &entry)
+		e, _ := r.RaftLog.storage.Entries(r.Prs[to].Next, lastIndex+1)
+		for i, entry := range e {
+			if entry.Index >= r.Prs[to].Next {
+				entries = append(entries, &e[i])
+			}
+
 		}
 	}
 
@@ -248,7 +251,7 @@ func (r *Raft) sendAppend(to uint64) bool {
 		}
 	}
 
-	term, err := r.RaftLog.Term(r.Prs[to].Match)
+	term, err := r.RaftLog.Term(r.Prs[to].Next - 1)
 	if err != nil {
 		return false
 	}
@@ -258,14 +261,13 @@ func (r *Raft) sendAppend(to uint64) bool {
 		From:    r.id,
 		Term:    r.Term,
 		LogTerm: term,
-		Index:   r.Prs[to].Match,
+		Index:   r.Prs[to].Next - 1,
 		Entries: entries,
 		Commit:  r.RaftLog.committed,
 	}
 
 	r.msgs = append(r.msgs, msg)
-	//fmt.Println("r.Prs[to].Match:", r.Prs[to].Match, "len(r.RaftLog.entries):", len(r.RaftLog.entries), "id ", r.id, "send to ", to, "len:", len(entries), "msg.Index:", msg.Index)
-
+	//log.Infof("%d send append to %d len:%d match:%d next:%d", r.id, to, len(msg.Entries), r.Prs[to].Match, r.Prs[to].Next)
 	return true
 }
 
@@ -388,7 +390,7 @@ func (r *Raft) becomeLeader() {
 	index := r.RaftLog.LastIndex()
 	for _, peer := range r.peers {
 		p := &Progress{
-			Match: index,
+			Match: 0,
 			Next:  index + 1,
 		}
 		r.Prs[peer] = p
@@ -581,23 +583,30 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 		r.State = StateFollower
 		r.Term = m.Term
 	} else if m.Reject == true {
-		//fmt.Println("from:", m.From, "reject")
-		if int(r.Prs[m.From].Match)-1 < 0 {
-
-		} else {
+		if int(r.Prs[m.From].Match)-1 >= 0 {
 			r.Prs[m.From].Match--
+		}
+
+		if int(r.Prs[m.From].Next)-1 >= 1 {
 			r.Prs[m.From].Next--
 		}
 
+		if int(r.Prs[m.From].Match)-1 < 0 {
+			r.Prs[m.From].Match = 0
+
+		}
+
+		if int(r.Prs[m.From].Next)-1 <= 0 {
+			r.Prs[m.From].Next = 1
+		}
+
+		//log.Infof("id:%d reject leader match:%d next:%d", m.From, r.Prs[m.From].Match, r.Prs[m.From].Next)
 		r.sendAppend(m.From)
 
 	} else if m.Reject == false {
 
 		r.Prs[m.From].Match = m.Index
 		r.Prs[m.From].Next = m.Index + 1
-		if m.Index > 1000 {
-			//fmt.Println("big from ", m.From)
-		}
 		//todo 只能提交自己任期内的日志
 
 		//找到match的中位数更新commit
@@ -606,14 +615,7 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 		for i := 0; i < len(r.peers); i++ {
 			matchInts = append(matchInts, r.Prs[r.peers[i]].Match)
 		}
-		//for id, progress := range r.Prs {
-		//	matchInts = append(matchInts, progress.Match)
-		//	if progress.Match > 1000 {
-		//		fmt.Println("r.id", id)
-		//	}
-		//}
 
-		//fmt.Println(matchInts)
 		sort.Slice(matchInts, func(i, j int) bool {
 			return matchInts[i] < matchInts[j]
 		})
@@ -688,9 +690,10 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 
 		//查找具体是在哪个位置匹配的 todo
 		var PreIndex uint64
-		var entriesIndex int
+
 		var PreTerm uint64 = 0
-		for i, entry := range m.Entries {
+		for _, entry := range m.Entries {
+
 			lastIndex := r.RaftLog.LastIndex()
 
 			if entry.Index <= lastIndex {
@@ -700,16 +703,15 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 					panic(err)
 				}
 			} else {
-				if PreIndex == 0 {
-					PreIndex = entry.Index
-				}
+				// 超出了节点匹配的日志
+				PreIndex = entry.Index
 				break
 			}
 
 			//fmt.Println("PreTerm:", PreTerm, "entry.Index:", entry.Index)
-			if PreTerm != entry.Term || (len(r.RaftLog.entries) > 0 && PreTerm == entry.Term && r.RaftLog.entries[PreIndex].Index != entry.Index) {
+			if PreTerm != entry.Term {
 				PreIndex = entry.Index
-				entriesIndex = i
+				break
 			}
 
 		}
@@ -720,21 +722,23 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		//不存在冲突
 		case PreIndex == 0:
 		//冲突的位置在已经提交的范围内 说明想要添加的日志有错 返回
-		case PreIndex+1 <= r.RaftLog.committed:
+		case PreIndex <= r.RaftLog.committed:
 			msg.Reject = true
 		//在冲突的位置截断之前的日志
 		default:
 			//todo storage 和 entries
 
-			if int(PreIndex)-int(r.RaftLog.stabled) > 0 && int(PreIndex-r.RaftLog.stabled) <= len(r.RaftLog.entries) {
-				r.RaftLog.entries = r.RaftLog.entries[:int(PreIndex-r.RaftLog.stabled)]
+			for i := 0; i < len(m.Entries); i++ {
+				if m.Entries[i].Index == PreIndex {
+					m.Entries = m.Entries[i:]
+					break
+				}
 			}
-			m.Entries = m.Entries[entriesIndex:]
-
+			//m.Entries = m.Entries[PreIndex-m.Index-1:]
 			//截断的位置影响了stabled 就需要更改stabled
-			//if r.RaftLog.stabled > PreIndex-1 {
-			//	r.RaftLog.stabled = PreIndex - 1
-			//}
+			if r.RaftLog.stabled > PreIndex-1 {
+				r.RaftLog.stabled = PreIndex - 1
+			}
 
 			for _, entry := range m.Entries {
 				r.RaftLog.entries = append(r.RaftLog.entries, *entry)
@@ -753,7 +757,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		//更新commited
 		if m.Commit > r.RaftLog.committed {
 			// commitIndex = min(leaderCommit, index of last new entry)
-			lastnewi := uint64(len(r.RaftLog.entries)) + r.RaftLog.stabled //index of last new entry
+			lastnewi := uint64(len(m.Entries)) + m.Index //index of last new entry
 			//fmt.Println("lastnewi:", lastnewi, "len(m.Entries):", len(m.Entries), "m.commit:", m.Commit, "r.id:", r.id, "r.state:", r.State)
 			r.RaftLog.committed = min(lastnewi, m.Commit)
 			//log.Infof("r.id:%d committed change to %d", r.id, min(lastnewi, m.Commit))
@@ -807,7 +811,7 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 						m.Reject = true
 					}
 				}
-			} else if r.RaftLog.stabled > 1 {
+			} else if r.RaftLog.stabled >= 1 {
 				firstIndex, _ := r.RaftLog.storage.FirstIndex()
 				lastIndex, _ := r.RaftLog.storage.LastIndex()
 				term, _ := r.RaftLog.storage.Term(lastIndex)
