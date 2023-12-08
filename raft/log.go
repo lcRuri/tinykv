@@ -97,6 +97,8 @@ func (l *RaftLog) allEntries() []pb.Entry {
 	// Your Code Here (2A).
 	// l.storage+l.entries
 	// 判断firstIndex和stabled大小
+	Entries := []pb.Entry{}
+
 	firstIndex, err := l.storage.FirstIndex()
 	if err != nil {
 		panic(err)
@@ -105,27 +107,24 @@ func (l *RaftLog) allEntries() []pb.Entry {
 	if err != nil {
 		panic(err)
 	}
-	Entries, err := l.storage.Entries(firstIndex, lastIndex+1)
+
+	if firstIndex <= lastIndex && firstIndex <= l.stabled+1 {
+		Entries, err = l.storage.Entries(firstIndex, l.stabled+1)
+	}
 
 	if err != nil {
 		panic(err)
 	}
 
-	if firstIndex <= l.stabled && len(l.entries) > 0 {
-		var truncateIndex = int(lastIndex)
-		index := l.entries[0].Index
-
-		for i := len(Entries) - 1; i >= 0; i-- {
-			if Entries[i].Index >= index {
-				truncateIndex = i
+	//todo 12.7
+	if len(l.entries) > 0 {
+		for _, entry := range l.entries {
+			if entry.Index > l.stabled {
+				Entries = append(Entries, entry)
 			}
 		}
-
-		l.stabled = uint64(truncateIndex)
-		Entries = Entries[:truncateIndex]
 	}
 
-	Entries = append(Entries, l.entries...)
 	return Entries
 }
 
