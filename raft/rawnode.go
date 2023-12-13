@@ -16,8 +16,6 @@ package raft
 
 import (
 	"errors"
-	"log"
-
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
 
@@ -155,59 +153,59 @@ func (rn *RawNode) Step(m pb.Message) error {
 
 // Ready returns the current point-in-time state of this RawNode.
 func (rn *RawNode) Ready() Ready {
-	// Your Code Here (2A).
-
-	entries := rn.Raft.RaftLog.unstableEntries()
-	// 保存committed但是还没有applied的数据数组
-	committedEntries := rn.Raft.RaftLog.nextEnts()
-
 	ready := Ready{
-		Entries:          entries,
-		CommittedEntries: committedEntries,
+		SoftState:        nil,
+		HardState:        pb.HardState{},
+		Entries:          rn.Raft.RaftLog.unstableEntries(),
+		Snapshot:         pb.Snapshot{},
+		CommittedEntries: rn.Raft.RaftLog.nextEnts(),
 		Messages:         rn.Raft.msgs,
 	}
 
-	softState := &SoftState{
-		Lead:      rn.Raft.Lead,
-		RaftState: rn.Raft.State,
-	}
-	if softState.Lead != rn.preSoftState.Lead || softState.RaftState != rn.preSoftState.RaftState {
-		ready.SoftState = softState
+	curSoftState := rn.Raft.SoftState()
+	if !(curSoftState.Lead == rn.preSoftState.Lead &&
+		curSoftState.RaftState == rn.preSoftState.RaftState) {
+		ready.SoftState = curSoftState
+		rn.preSoftState = curSoftState
 	}
 
-	hardState, _, _ := rn.Raft.RaftLog.storage.InitialState()
-	if hardState.Vote != rn.preHardState.Vote || hardState.Term != rn.preHardState.Term || hardState.Commit != rn.preHardState.Commit {
-		ready.HardState = hardState
+	curHardState := rn.Raft.HardState()
+	if !isHardStateEqual(*curHardState, *rn.preHardState) {
+		ready.HardState = *curHardState
+		// rn.prevHardState = curHardState
 	}
 
 	return ready
 }
 
 // HasReady called when RawNode user need to check if any Ready pending.
+// 当 RawNode 用户需要检查是否有任何 Ready 待处理时调用 HasReady
+// 如果有ready要处理那么就不能调用Ready 需要等处理完之后再调用
 func (rn *RawNode) HasReady() bool {
 	// Your Code Here (2A).
-	r := rn.Raft
-	hardState, _, err := r.RaftLog.storage.InitialState()
-	if err != nil {
-		panic(err)
-	}
-	if hardState.Vote == rn.preHardState.Vote && hardState.Term == rn.preHardState.Term && hardState.Commit == rn.preHardState.Commit {
-		return false
+	curSoftState := rn.Raft.SoftState()
+	if !(curSoftState.Lead == rn.preSoftState.Lead &&
+		curSoftState.RaftState == rn.preSoftState.RaftState) {
+		return true
 	}
 
-	softState := &SoftState{
-		Lead:      rn.Raft.Lead,
-		RaftState: rn.Raft.State,
-	}
-	if softState.Lead == rn.preSoftState.Lead && softState.RaftState == rn.preSoftState.RaftState {
-		return false
+	curhardState := rn.Raft.HardState()
+	if !IsEmptyHardState(*curhardState) &&
+		!isHardStateEqual(*curhardState, *rn.preHardState) {
+		return true
 	}
 
-	if len(r.msgs) > 0 || len(r.RaftLog.unstableEntries()) > 0 || r.RaftLog.hasNextEnts() {
-		return false
+	// unstable Entries or messages exists return true
+	if len(rn.Raft.RaftLog.unstableEntries()) > 0 ||
+		len(rn.Raft.msgs) > 0 || len(rn.Raft.RaftLog.nextEnts()) > 0 {
+		return true
 	}
 
-	return true
+	if !IsEmptySnap(rn.Raft.RaftLog.pendingSnapshot) {
+		return true
+	}
+
+	return false
 }
 
 // Advance notifies the RawNode that the application has applied and saved progress in the
@@ -217,25 +215,16 @@ func (rn *RawNode) HasReady() bool {
 func (rn *RawNode) Advance(rd Ready) {
 	// Your Code Here (2A).
 	//applied rd中的entries 并且更改对应的状态
-	lastIndex, err := rn.Raft.RaftLog.storage.LastIndex()
-	if err != nil {
-		log.Printf("rn.Raft.RaftLog.storage.LastIndex() falied\n")
+	if !IsEmptyHardState(rd.HardState) {
+		rn.preHardState = &rd.HardState
+	}
+	if len(rd.Entries) > 0 {
+		rn.Raft.RaftLog.stabled = rd.Entries[len(rd.Entries)-1].Index
+	}
+	if len(rd.CommittedEntries) > 0 {
+		rn.Raft.RaftLog.applied = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
 	}
 
-	rn.Raft.RaftLog.applied = lastIndex
-	rn.Raft.RaftLog.stabled = lastIndex
-
-	//删除已经添加到storage中的日志
-	lastCommitedEntries := rd.CommittedEntries[len(rd.CommittedEntries)-1]
-	var index int
-	for i, entry := range rn.Raft.RaftLog.entries {
-		if entry.Index == lastCommitedEntries.Index && entry.Term == lastCommitedEntries.Term {
-			index = i
-			break
-		}
-	}
-
-	rn.Raft.RaftLog.entries = rn.Raft.RaftLog.entries[index+1:]
 }
 
 // GetProgress return the Progress of this node and its peers, if this

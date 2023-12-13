@@ -17,11 +17,10 @@ package raft
 import (
 	"bytes"
 	"fmt"
+	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"math/rand"
 	"reflect"
 	"testing"
-
-	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
 
 // returns a new MemoryStorage with only ents filled

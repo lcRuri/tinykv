@@ -374,7 +374,7 @@ func (r *Raft) becomeCandidate() {
 	r.votes[r.id] = true
 	r.electionElapsed = 0
 
-	//log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
+	log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
 }
 
 // becomeLeader transform this peer's state to leader
@@ -404,7 +404,7 @@ func (r *Raft) becomeLeader() {
 	r.Prs[r.id].Match = r.RaftLog.LastIndex()
 	r.Prs[r.id].Next = r.RaftLog.LastIndex() + 1
 
-	//log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
+	log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
 	//log.Info("raft log stabled:", r.RaftLog.stabled, "raft log commited:", r.RaftLog.committed, "raft log len entries", len(r.RaftLog.entries), "lastIndex", r.RaftLog.LastIndex())
 	//for i := 0; i < len(r.peers); i++ {
 	//	log.Info("id:", r.peers[i], "match:", r.Prs[r.peers[i]].Match, "next:", r.Prs[r.peers[i]].Next)
@@ -814,15 +814,19 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 			} else if r.RaftLog.stabled >= 1 {
 				firstIndex, _ := r.RaftLog.storage.FirstIndex()
 				lastIndex, _ := r.RaftLog.storage.LastIndex()
-				term, _ := r.RaftLog.storage.Term(lastIndex)
-				entries, _ := r.RaftLog.storage.Entries(firstIndex, lastIndex+1)
-				if m.LogTerm < term {
-					m.Reject = true
-				} else if m.LogTerm == term {
-					if m.Index < entries[len(entries)-1].Index {
+				if firstIndex <= lastIndex {
+					term, _ := r.RaftLog.storage.Term(lastIndex)
+					entries, _ := r.RaftLog.storage.Entries(firstIndex, lastIndex+1)
+					if m.LogTerm < term {
+						log.Infof("aaaaaaaaaaaaa")
 						m.Reject = true
+					} else if m.LogTerm == term {
+						if m.Index < entries[len(entries)-1].Index {
+							m.Reject = true
+						}
 					}
 				}
+
 			}
 
 			//返回响应

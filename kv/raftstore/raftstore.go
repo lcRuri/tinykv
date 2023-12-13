@@ -2,9 +2,6 @@ package raftstore
 
 import (
 	"bytes"
-	"sync"
-	"time"
-
 	"github.com/Connor1996/badger"
 	"github.com/Connor1996/badger/y"
 	"github.com/pingcap-incubator/tinykv/kv/config"
@@ -15,11 +12,11 @@ import (
 	"github.com/pingcap-incubator/tinykv/kv/raftstore/snap"
 	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
 	"github.com/pingcap-incubator/tinykv/kv/util/worker"
-	"github.com/pingcap-incubator/tinykv/log"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/metapb"
 	rspb "github.com/pingcap-incubator/tinykv/proto/pkg/raft_serverpb"
 	"github.com/pingcap-incubator/tinykv/scheduler/pkg/btree"
 	"github.com/pingcap/errors"
+	"sync"
 )
 
 var _ btree.Item = &regionItem{}
@@ -117,7 +114,7 @@ func (bs *Raftstore) loadPeers() ([]*peer, error) {
 	var totalCount, tombStoneCount int
 	var regionPeers []*peer
 
-	t := time.Now()
+	//t := time.Now()
 	kvWB := new(engine_util.WriteBatch)
 	raftWB := new(engine_util.WriteBatch)
 	err := kvEngine.View(func(txn *badger.Txn) error {
@@ -172,8 +169,8 @@ func (bs *Raftstore) loadPeers() ([]*peer, error) {
 	kvWB.MustWriteToDB(ctx.engine.Kv)
 	raftWB.MustWriteToDB(ctx.engine.Raft)
 
-	log.Infof("start store %d, region_count %d, tombstone_count %d, takes %v",
-		storeID, totalCount, tombStoneCount, time.Since(t))
+	//log.Infof("start store %d, region_count %d, tombstone_count %d, takes %v",
+	//	storeID, totalCount, tombStoneCount, time.Since(t))
 	return regionPeers, nil
 }
 

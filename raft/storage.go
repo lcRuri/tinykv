@@ -264,6 +264,7 @@ func (ms *MemoryStorage) Append(entries []pb.Entry) error {
 		return nil
 	}
 	// truncate compacted entries
+	// 截断重复的日志
 	if first > entries[0].Index {
 		entries = entries[first-entries[0].Index:]
 	}

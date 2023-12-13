@@ -194,6 +194,7 @@ func (c *Cluster) Request(key []byte, reqs []*raft_cmdpb.Request, timeout time.D
 		resp, txn := c.CallCommandOnLeader(&req, timeout)
 		if resp == nil {
 			// it should be timeouted innerly
+			log.Infof("resp is nil")
 			SleepMS(100)
 			continue
 		}
@@ -223,9 +224,11 @@ func (c *Cluster) CallCommandOnLeader(request *raft_cmdpb.RaftCmdRequest, timeou
 			panic(fmt.Sprintf("can't get leader of region %d", regionID))
 		}
 		request.Header.Peer = leader
+		// todo lab2b problem
+		//log.Infof("type:%v", request.Requests)
 		resp, txn := c.CallCommand(request, 1*time.Second)
 		if resp == nil {
-			log.Debugf("can't call command %s on leader %d of region %d", request.String(), leader.GetId(), regionID)
+			log.Infof("can't call command %s on leader %d of region %d", request.String(), leader.GetId(), regionID)
 			newLeader := c.LeaderOfRegion(regionID)
 			if leader == newLeader {
 				region, _, err := c.schedulerClient.GetRegionByID(context.TODO(), regionID)
@@ -234,17 +237,17 @@ func (c *Cluster) CallCommandOnLeader(request *raft_cmdpb.RaftCmdRequest, timeou
 				}
 				peers := region.GetPeers()
 				leader = peers[rand.Int()%len(peers)]
-				log.Debugf("leader info maybe wrong, use random leader %d of region %d", leader.GetId(), regionID)
+				log.Infof("leader info maybe wrong, use random leader %d of region %d", leader.GetId(), regionID)
 			} else {
 				leader = newLeader
-				log.Debugf("use new leader %d of region %d", leader.GetId(), regionID)
+				log.Infof("use new leader %d of region %d", leader.GetId(), regionID)
 			}
 			continue
 		}
 		if resp.Header.Error != nil {
 			err := resp.Header.Error
 			if err.GetStaleCommand() != nil || err.GetEpochNotMatch() != nil || err.GetNotLeader() != nil {
-				log.Debugf("encouter retryable err %+v", resp)
+				log.Infof("encouter retryable err %+v", resp)
 				if err.GetNotLeader() != nil && err.GetNotLeader().Leader != nil {
 					leader = err.GetNotLeader().Leader
 				} else {
@@ -276,7 +279,7 @@ func (c *Cluster) GetRegion(key []byte) *metapb.Region {
 		}
 		// We may meet range gap after split, so here we will
 		// retry to get the region again.
-		SleepMS(20)
+		SleepMS(40)
 	}
 	panic(fmt.Sprintf("find no region for %s", hex.EncodeToString(key)))
 }
@@ -305,6 +308,7 @@ func (c *Cluster) MustPut(key, value []byte) {
 func (c *Cluster) MustPutCF(cf string, key, value []byte) {
 	req := NewPutCfCmd(cf, key, value)
 	resp, _ := c.Request(key, []*raft_cmdpb.Request{req}, 5*time.Second)
+
 	if resp.Header.Error != nil {
 		panic(resp.Header.Error)
 	}

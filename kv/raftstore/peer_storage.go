@@ -380,24 +380,23 @@ func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, erro
 	err := ps.Append(ready.Entries, raftWB)
 
 	l := len(ready.Entries)
-	hardState := ready.HardState
 
-	state := &eraftpb.HardState{
-		Term:   hardState.Term,
-		Vote:   hardState.Vote,
-		Commit: hardState.Commit,
+	if !raft.IsEmptyHardState(ready.HardState) {
+		ps.raftState.HardState = &ready.HardState
 	}
-	localState := &rspb.RaftLocalState{
-		HardState: state,
-		LastIndex: ready.Entries[l-1].Index,
-		LastTerm:  ready.Entries[l-1].Term,
+	if l > 0 {
+		localState := &rspb.RaftLocalState{
+			LastIndex: ready.Entries[l-1].Index,
+			LastTerm:  ready.Entries[l-1].Term,
+		}
+		//更新ps的raftState
+		ps.raftState = localState
 	}
-	//更新ps的raftState
-	ps.raftState = localState
-	raftStateKey := meta.RaftStateKey(ps.region.Id)
+
+	raftStateKey := meta.RaftStateKey(ps.region.GetId())
 	//存储到磁盘上
-	raftWB.SetMeta(raftStateKey, localState)
-
+	raftWB.SetMeta(raftStateKey, ps.raftState)
+	err = raftWB.WriteToDB(ps.Engines.Raft)
 	var applySnapshot *ApplySnapResult
 
 	return applySnapshot, err

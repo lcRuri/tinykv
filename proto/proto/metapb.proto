@@ -36,8 +36,10 @@ message RegionEpoch {
 }
 
 message Region {
+    //Region 的唯一表示，通过 PD 全局唯一分配
     uint64 id = 1;
     // Region key range [start_key, end_key).
+    // 用来表示这个 Region 的范围 [start_key, end_key)，对于最开始的 region，start 和 end key 都是空，TiKV 内部会特殊处理
     bytes start_key = 2;
     bytes end_key = 3;
     RegionEpoch region_epoch = 4;

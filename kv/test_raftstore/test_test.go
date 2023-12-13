@@ -29,18 +29,20 @@ func runClient(t *testing.T, me int, ca chan bool, fn func(me int, t *testing.T)
 }
 
 // spawn ncli clients and wait until they are all done
-// 生成 ncli 客户端并等待它们全部完成
 func SpawnClientsAndWait(t *testing.T, ch chan bool, ncli int, fn func(me int, t *testing.T)) {
-	defer func() { ch <- true }()
+	defer func() {
+		log.Infof("ch_clients<-")
+		ch <- true
+	}()
 	ca := make([]chan bool, ncli)
 	for cli := 0; cli < ncli; cli++ {
 		ca[cli] = make(chan bool)
 		go runClient(t, cli, ca[cli], fn)
 	}
-	// log.Printf("SpawnClientsAndWait: waiting for clients")
+	log.Infof("SpawnClientsAndWait: waiting for clients")
 	for cli := 0; cli < ncli; cli++ {
 		ok := <-ca[cli]
-		// log.Infof("SpawnClientsAndWait: client %d is done\n", cli)
+		log.Infof("SpawnClientsAndWait: client %d is done\n", cli)
 		if ok == false {
 			t.Fatalf("failure")
 		}
@@ -143,18 +145,6 @@ func confchanger(t *testing.T, cluster *Cluster, ch chan bool, done *int32) {
 // - If maxraftlog is a positive number, the count of the persistent log for Raft shouldn't exceed 2*maxraftlog.
 // - If confchange is set, the cluster will schedule random conf change concurrently.
 // - If split is set, split region when size exceed 1024 bytes.
-// / 基本测试如下：一个或多个客户端提交 Put/Scan
-//
-//	在一段时间内对服务器集的操作。 经期过后
-//	最后，测试检查所有序列值是否存在，并且
-//	特定键并执行 Delete 进行清理。
-//
-// - 如果设置了不可靠，则 RPC 可能会失败。
-// - 如果设置了崩溃，则服务器将在时间段结束后重新启动。
-// - 如果设置了分区，则测试会在服务器之间并发对网络进行重新分区。
-// - 如果 maxraftlog 为正数，则 Raft 的持久化日志计数不应超过 2*maxraftlog。
-// - 如果设置了 confchange，集群将同时调度随机 conf 更改。
-// - 如果设置了split，则当大小超过1024字节时，将拆分区域。
 func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash bool, partitions bool, maxraftlog int, confchange bool, split bool) {
 	title := "Test: "
 	if unreliable {
@@ -188,13 +178,11 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 		cfg.RegionMaxSize = 300
 		cfg.RegionSplitSize = 200
 	}
-	//创建集群
+	//新建集群
 	cluster := NewTestCluster(nservers, cfg)
-	//启动集群
 	cluster.Start()
 	defer cluster.Shutdown()
 
-	//选举
 	electionTimeout := cfg.RaftBaseTickInterval * time.Duration(cfg.RaftElectionTimeoutTicks)
 	// Wait for leader election
 	time.Sleep(2 * electionTimeout)
@@ -210,27 +198,31 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 		clnts[i] = make(chan int, 1)
 	}
 	for i := 0; i < 3; i++ {
-		// log.Printf("Iteration %v\n", i)
+		log.Infof("Iteration %v\n", i)
 		atomic.StoreInt32(&done_clients, 0)
 		atomic.StoreInt32(&done_partitioner, 0)
 		go SpawnClientsAndWait(t, ch_clients, nclients, func(cli int, t *testing.T) {
+			//控制范围
 			j := 0
+			//结束的时候将j的范围写入
 			defer func() {
 				clnts[cli] <- j
 			}()
 			last := ""
 			for atomic.LoadInt32(&done_clients) == 0 {
+				//log.Infof("%d", done_clients)
+				//一半的概率进行读写
 				if (rand.Int() % 1000) < 500 {
 					key := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", j)
 					value := "x " + strconv.Itoa(cli) + " " + strconv.Itoa(j) + " y"
-					// log.Infof("%d: client new put %v,%v\n", cli, key, value)
+					//log.Infof("%d: client new put %v,%v", cli, key, value)
 					cluster.MustPut([]byte(key), []byte(value))
 					last = NextValue(last, value)
 					j++
 				} else {
 					start := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", 0)
 					end := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", j)
-					// log.Infof("%d: client new scan %v-%v\n", cli, start, end)
+					//log.Infof("%d: client new scan %v-%v", cli, start, end)
 					values := cluster.Scan([]byte(start), []byte(end))
 					v := string(bytes.Join(values, []byte("")))
 					if v != last {
@@ -238,6 +230,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 					}
 				}
 			}
+			log.Infof("SpawnClientsAndWait quit")
 		})
 
 		if unreliable || partitions {
@@ -251,13 +244,13 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 			go confchanger(t, cluster, ch_confchange, &done_confchanger)
 		}
 
-		//todo why
 		time.Sleep(5 * time.Second)
-		atomic.StoreInt32(&done_clients, 1)     // tell clients to quit
+		atomic.StoreInt32(&done_clients, 1) // tell clients to quit
+		log.Infof("done_clientsL:%d", done_clients)
 		atomic.StoreInt32(&done_partitioner, 1) // tell partitioner to quit
 		atomic.StoreInt32(&done_confchanger, 1) // tell confchanger to quit
 		if unreliable || partitions {
-			// log.Printf("wait for partitioner\n")
+			log.Infof("wait for partitioner\n")
 			<-ch_partitioner
 			// reconnect network and submit a request. A client may
 			// have submitted a request in a minority.  That request
@@ -268,9 +261,9 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 			time.Sleep(electionTimeout)
 		}
 
-		// log.Printf("wait for clients\n")
+		log.Infof("wait for clients\n")
 		<-ch_clients
-
+		log.Infof("clients ok\n")
 		if crash {
 			log.Warnf("shutdown servers\n")
 			for i := 1; i <= nservers; i++ {
@@ -287,22 +280,24 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 		}
 
 		for cli := 0; cli < nclients; cli++ {
-			// log.Printf("read from clients %d\n", cli)
+			log.Infof("read from clients %d nclients %d\n", cli, nclients)
 			j := <-clnts[cli]
 
-			// if j < 10 {
-			// 	log.Printf("Warning: client %d managed to perform only %d put operations in 1 sec?\n", i, j)
-			// }
+			if j < 10 {
+				log.Infof("Warning: client %d managed to perform only %d put operations in 1 sec?\n", i, j)
+			}
 			start := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", 0)
 			end := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", j)
+			log.Infof("start:%v end:%v", start, end)
 			values := cluster.Scan([]byte(start), []byte(end))
 			v := string(bytes.Join(values, []byte("")))
 			checkClntAppends(t, cli, v, j)
-
 			for k := 0; k < j; k++ {
 				key := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", k)
+				//log.Infof("delete key:%s", key)
 				cluster.MustDelete([]byte(key))
 			}
+			log.Infof("read done")
 		}
 
 		if maxraftlog > 0 {

@@ -53,12 +53,13 @@ func (rw *raftWorker) run(closeCh <-chan struct{}, wg *sync.WaitGroup) {
 			if peerState == nil {
 				continue
 			}
+			//处理raft消息
 			newPeerMsgHandler(peerState.peer, rw.ctx).HandleMsg(msg)
 		}
 		for _, peerState := range peerStateMap {
-			//开始lab2b(step6)
 			newPeerMsgHandler(peerState.peer, rw.ctx).HandleRaftReady()
 		}
+
 	}
 }
 

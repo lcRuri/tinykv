@@ -116,7 +116,6 @@ func (l *RaftLog) allEntries() []pb.Entry {
 		panic(err)
 	}
 
-	//todo 12.7
 	if len(l.entries) > 0 {
 		for _, entry := range l.entries {
 			if entry.Index > l.stabled {
@@ -162,7 +161,7 @@ func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 		entries, _ := l.storage.Entries(firstIndex, lastIndex+1)
 
 		for _, entry := range entries {
-			if entry.Index > l.applied && entry.Index < l.committed {
+			if entry.Index > l.applied && entry.Index <= l.committed {
 				ents = append(ents, entry)
 				partition = entry.Index
 			}
@@ -229,4 +228,13 @@ func (l *RaftLog) hasNextEnts() bool {
 
 	off := max(l.applied+1, index)
 	return l.committed+1 > off
+}
+
+func (l *RaftLog) FirstIndex() uint64 {
+	// Your Code Here (2A).
+	if len(l.entries) == 0 {
+		i, _ := l.storage.FirstIndex()
+		return i - 1
+	}
+	return l.entries[0].Index
 }

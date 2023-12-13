@@ -513,9 +513,9 @@ func TestLeaderAcknowledgeCommit2AB(t *testing.T) {
 func TestLeaderCommitPrecedingEntries2AB(t *testing.T) {
 	tests := [][]pb.Entry{
 		{},
-		//{{Term: 2, Index: 1}},
-		//{{Term: 1, Index: 1}, {Term: 2, Index: 2}},
-		//{{Term: 1, Index: 1}},
+		{{Term: 2, Index: 1}},
+		{{Term: 1, Index: 1}, {Term: 2, Index: 2}},
+		{{Term: 1, Index: 1}},
 	}
 	for i, tt := range tests {
 		storage := NewMemoryStorage()
@@ -769,6 +769,7 @@ func TestLeaderSyncFollowerLog2AB(t *testing.T) {
 			{Term: 3, Index: 7}, {Term: 3, Index: 8}, {Term: 3, Index: 9}, {Term: 3, Index: 10}, {Term: 3, Index: 11},
 		},
 	}
+
 	for i, tt := range tests {
 		//创建一个包括ents日志的leader节点
 		leadStorage := NewMemoryStorage()
