@@ -47,16 +47,18 @@ func (d *peerMsgHandler) HandleRaftReady() {
 	}
 	// Your Code Here (2B).
 	//todo
-	ready := d.RaftGroup.Ready()
+
 	if !d.RaftGroup.HasReady() {
 		return
 	}
 
+	ready := d.RaftGroup.Ready()
 	result, err := d.peerStorage.SaveReadyState(&ready)
 	if err != nil {
 		return
 	}
 
+	//存储结果所在的region
 	if result != nil {
 		d.peerStorage.SetRegion(result.Region)
 		d.ctx.storeMeta.Lock()
@@ -77,17 +79,6 @@ func (d *peerMsgHandler) HandleRaftReady() {
 			err := kvWB.SetMeta(meta.ApplyStateKey(d.regionId), d.peerStorage.applyState)
 			if err != nil {
 				panic(err)
-			}
-
-			if d.stopped {
-				log.Infof("d.stopped")
-				WB := new(engine_util.WriteBatch)
-				WB.DeleteMeta(meta.ApplyStateKey(d.regionId))
-				err = WB.WriteToDB(d.peerStorage.Engines.Kv)
-				if err != nil {
-					panic(err)
-				}
-				return
 			}
 
 			err = kvWB.WriteToDB(d.peerStorage.Engines.Kv)
@@ -172,37 +163,39 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 	}
 
 	if len(msg.Requests) != 0 {
-		for len(msg.Requests) > 0 {
-			req := msg.Requests[0]
-			var key []byte
-			switch req.CmdType {
-			case raft_cmdpb.CmdType_Get:
-				key = req.Get.Key
-			case raft_cmdpb.CmdType_Put:
-				key = req.Put.Key
-			case raft_cmdpb.CmdType_Delete:
-				key = req.Delete.Key
-			case raft_cmdpb.CmdType_Snap:
-			}
-			err = util.CheckKeyInRegion(key, d.Region())
-			if err != nil && req.CmdType != raft_cmdpb.CmdType_Snap {
-				cb.Done(ErrResp(err))
-				msg.Requests = msg.Requests[1:]
-				continue
-			}
-			data, err1 := msg.Marshal()
-			if err1 != nil && data != nil {
-				panic(err)
-			}
-			p := &proposal{index: d.nextProposalIndex(), term: d.Term(), cb: cb}
-
-			// println("Propose No.", d.nextProposalIndex(), "proposal")
-			d.proposals = append(d.proposals, p)
-			_ = d.RaftGroup.Propose(data)
-			msg.Requests = msg.Requests[1:]
+		log.Infof("edcbb")
+		req := msg.Requests[0]
+		var key []byte
+		//根据msg类型不同进行处理
+		switch req.CmdType {
+		case raft_cmdpb.CmdType_Get:
+			key = req.Get.Key
+		case raft_cmdpb.CmdType_Put:
+			key = req.Put.Key
+		case raft_cmdpb.CmdType_Delete:
+			key = req.Delete.Key
+		case raft_cmdpb.CmdType_Snap:
 		}
-	}
+		log.Infof("erff")
+		err = util.CheckKeyInRegion(key, d.Region())
+		if err != nil && req.CmdType != raft_cmdpb.CmdType_Snap {
+			cb.Done(ErrResp(err))
+			return
+		}
+		data, err1 := msg.Marshal()
+		if err1 != nil && data != nil {
+			panic(err)
+		}
+		p := &proposal{index: d.nextProposalIndex(), term: d.Term(), cb: cb}
 
+		println("Propose No.", d.nextProposalIndex(), "proposal")
+		d.proposals = append(d.proposals, p)
+		err = d.RaftGroup.Propose(data)
+		if err != nil {
+			log.Infof("err:%v", err.Error())
+		}
+
+	}
 }
 
 func (d *peerMsgHandler) onTick() {
@@ -647,10 +640,11 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 		panic(err)
 	}
 	if len(msg.Requests) > 0 {
-		//log.Infof("Requests:%v", msg.Requests)
+		//log.Infof("Requests:%v", msg.Requests[0])
 		req := msg.Requests[0]
 		switch req.CmdType {
 		case raft_cmdpb.CmdType_Get:
+
 		case raft_cmdpb.CmdType_Put:
 			kvWB.SetCF(req.Put.Cf, req.Put.Key, req.Put.Value)
 		case raft_cmdpb.CmdType_Delete:
@@ -675,7 +669,7 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 					log.Infof(" p.term != entry.Term")
 					NotifyStaleReq(entry.Term, p.cb)
 				} else {
-					//log.Infof("process")
+					log.Infof("process")
 					resp := &raft_cmdpb.RaftCmdResponse{Header: &raft_cmdpb.RaftResponseHeader{}}
 
 					switch req.CmdType {
@@ -701,8 +695,11 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 						//log.Infof("Region:%v", d.Region())
 					}
 					p.cb.Done(resp)
+					log.Infof("resp")
 				}
 				d.proposals = d.proposals[1:]
+			} else {
+				//log.Infof("p.index:%d entry.index:%d", p.index, entry.Index)
 			}
 		}
 	}
