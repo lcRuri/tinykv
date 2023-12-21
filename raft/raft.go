@@ -192,7 +192,8 @@ func newRaft(c *Config) *Raft {
 	// Your Code Here (2A).
 	state, confstate, err := c.Storage.InitialState()
 	if err != nil {
-		panic(err)
+		log.Error(err.Error())
+		//panic(err)
 	}
 
 	if c.peers == nil {
@@ -380,7 +381,7 @@ func (r *Raft) becomeCandidate() {
 	r.Vote = r.id
 	r.electionElapsed = 0 - rand.Intn(r.electionTimeout)
 
-	log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
+	//log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
 }
 
 // becomeLeader transform this peer's state to leader
@@ -413,7 +414,7 @@ func (r *Raft) becomeLeader() {
 	r.bcastAppend()
 	//log.Infof("lastIndex:%d", r.RaftLog.LastIndex())
 
-	log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
+	//log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
 	//log.Info("raft log stabled:", r.RaftLog.stabled, "raft log commited:", r.RaftLog.committed, "raft log len entries", len(r.RaftLog.entries), "lastIndex", r.RaftLog.LastIndex())
 	//for i := 0; i < len(r.peers); i++ {
 	//	log.Info("id:", r.peers[i], "match:", r.Prs[r.peers[i]].Match, "next:", r.Prs[r.peers[i]].Next)

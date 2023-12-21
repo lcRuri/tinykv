@@ -212,7 +212,7 @@ func (l *RaftLog) Term(i uint64) (uint64, error) {
 	term, err := l.storage.Term(i)
 	if err != nil {
 		log.Errorf("index:%d len(l.entries):%d ", i, len(l.entries))
-		panic(err)
+		//panic(err)
 	}
 
 	return term, nil

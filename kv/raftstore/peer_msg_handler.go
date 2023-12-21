@@ -165,7 +165,7 @@ func (d *peerMsgHandler) preProposeRaftCommand(req *raft_cmdpb.RaftCmdRequest) e
 func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *message.Callback) {
 	err := d.preProposeRaftCommand(msg)
 	if err != nil {
-		log.Infof("err:%s", err.Error())
+		//log.Infof("err:%s", err.Error())
 		cb.Done(ErrResp(err))
 		return
 	}
@@ -676,7 +676,7 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 				p.cb.Done(ErrResp(&util.ErrStaleCommand{}))
 				d.proposals = d.proposals[1:]
 				if len(d.proposals) == 0 {
-					log.Infof("nilllll")
+					//log.Infof("nilllll")
 					return
 				}
 				p = d.proposals[0]
@@ -684,7 +684,7 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 
 			if p.index == entry.Index {
 				if p.term != entry.Term {
-					log.Infof(" p.term != entry.Term")
+					//log.Infof(" p.term != entry.Term")
 					NotifyStaleReq(entry.Term, p.cb)
 				} else {
 					resp := &raft_cmdpb.RaftCmdResponse{Header: &raft_cmdpb.RaftResponseHeader{}}

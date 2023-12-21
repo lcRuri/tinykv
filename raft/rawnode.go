@@ -167,12 +167,10 @@ func (rn *RawNode) Ready() Ready {
 		// rn.prevHardState = curHardState
 	}
 
-	if !IsEmptySnap(rn.Raft.RaftLog.pendingSnapshot) {
-		ready.Snapshot = *rn.Raft.RaftLog.pendingSnapshot
-		rn.Raft.RaftLog.pendingSnapshot = nil
-	}
-
+	//very important ready之后要清空Raft.msgs 因为少了这个 找了两个星期bug
+	//原因：第一次循环可能正常 但是到第二次肯定不正常 因为第一次的消息还存在里面
 	rn.Raft.msgs = nil
+
 	return ready
 }
 

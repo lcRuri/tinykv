@@ -38,10 +38,10 @@ func SpawnClientsAndWait(t *testing.T, ch chan bool, ncli int, fn func(me int, t
 		ca[cli] = make(chan bool)
 		go runClient(t, cli, ca[cli], fn)
 	}
-	log.Infof("SpawnClientsAndWait: waiting for clients")
+	//log.Infof("SpawnClientsAndWait: waiting for clients")
 	for cli := 0; cli < ncli; cli++ {
 		ok := <-ca[cli]
-		log.Infof("SpawnClientsAndWait: client %d is done\n", cli)
+		//log.Infof("SpawnClientsAndWait: client %d is done\n", cli)
 		if ok == false {
 			t.Fatalf("failure")
 		}
@@ -103,7 +103,7 @@ func networkchaos(t *testing.T, cluster *Cluster, ch chan bool, done *int32, unr
 				}
 			}
 			cluster.ClearFilters()
-			log.Infof("partition: %v, %v", pa[0], pa[1])
+			//log.Infof("partition: %v, %v", pa[0], pa[1])
 			cluster.AddFilter(&PartitionFilter{
 				s1: pa[0],
 				s2: pa[1],
@@ -197,7 +197,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 		clnts[i] = make(chan int, 1)
 	}
 	for i := 0; i < 3; i++ {
-		log.Infof("Iteration %v\n", i)
+		//log.Infof("Iteration %v\n", i)
 		atomic.StoreInt32(&done_clients, 0)
 		atomic.StoreInt32(&done_partitioner, 0)
 		go SpawnClientsAndWait(t, ch_clients, nclients, func(cli int, t *testing.T) {
@@ -229,7 +229,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 					}
 				}
 			}
-			log.Infof("SpawnClientsAndWait quit")
+			//log.Infof("SpawnClientsAndWait quit")
 		})
 
 		if unreliable || partitions {
@@ -245,11 +245,11 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 
 		time.Sleep(5 * time.Second)
 		atomic.StoreInt32(&done_clients, 1) // tell clients to quit
-		log.Infof("done_clientsL:%d", done_clients)
+		//log.Infof("done_clientsL:%d", done_clients)
 		atomic.StoreInt32(&done_partitioner, 1) // tell partitioner to quit
 		atomic.StoreInt32(&done_confchanger, 1) // tell confchanger to quit
 		if unreliable || partitions {
-			log.Infof("wait for partitioner\n")
+			//log.Infof("wait for partitioner\n")
 			<-ch_partitioner
 			// reconnect network and submit a request. A client may
 			// have submitted a request in a minority.  That request
@@ -260,18 +260,18 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 			time.Sleep(electionTimeout)
 		}
 
-		log.Infof("wait for clients\n")
+		//log.Infof("wait for clients\n")
 		<-ch_clients
-		log.Infof("clients ok\n")
+		//log.Infof("clients ok\n")
 		if crash {
-			log.Warnf("shutdown servers\n")
+			//log.Warnf("shutdown servers\n")
 			for i := 1; i <= nservers; i++ {
 				cluster.StopServer(uint64(i))
 			}
 			// Wait for a while for servers to shutdown, since
 			// shutdown isn't a real crash and isn't instantaneous
 			time.Sleep(electionTimeout)
-			log.Warnf("restart servers\n")
+			//log.Warnf("restart servers\n")
 			// crash and re-start all
 			for i := 1; i <= nservers; i++ {
 				cluster.StartServer(uint64(i))
@@ -279,15 +279,15 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 		}
 
 		for cli := 0; cli < nclients; cli++ {
-			log.Infof("read from clients %d nclients %d\n", cli, nclients)
+			//log.Infof("read from clients %d nclients %d\n", cli, nclients)
 			j := <-clnts[cli]
 
-			if j < 10 {
-				log.Infof("Warning: client %d managed to perform only %d put operations in 1 sec?\n", i, j)
-			}
+			//if j < 10 {
+			//	log.Infof("Warning: client %d managed to perform only %d put operations in 1 sec?\n", i, j)
+			//}
 			start := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", 0)
 			end := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", j)
-			log.Infof("start:%v end:%v", start, end)
+			//log.Infof("start:%v end:%v", start, end)
 			values := cluster.Scan([]byte(start), []byte(end))
 			v := string(bytes.Join(values, []byte("")))
 			checkClntAppends(t, cli, v, j)
@@ -296,7 +296,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 				//log.Infof("delete key:%s", key)
 				cluster.MustDelete([]byte(key))
 			}
-			log.Infof("read done")
+			//log.Infof("read done")
 		}
 
 		if maxraftlog > 0 {

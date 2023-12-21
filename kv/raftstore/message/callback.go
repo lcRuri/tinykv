@@ -1,7 +1,6 @@
 package message
 
 import (
-	"github.com/pingcap-incubator/tinykv/log"
 	"time"
 
 	"github.com/Connor1996/badger"
@@ -37,7 +36,7 @@ func (cb *Callback) WaitRespWithTimeout(timeout time.Duration) *raft_cmdpb.RaftC
 		//log.Infof("cb.done")
 		return cb.Resp
 	case <-time.After(timeout):
-		log.Infof("time.After")
+		//log.Infof("time.After")
 		return cb.Resp
 	}
 }
