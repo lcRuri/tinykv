@@ -342,6 +342,7 @@ func (r *Raft) tick() {
 
 	//维护heartElapsed
 	case StateLeader:
+
 		r.heartbeatElapsed++
 		//当heartbeatElapsed超过heartbeatTimeout，发送心跳
 		if r.heartbeatElapsed >= r.heartbeatTimeout {
@@ -356,11 +357,12 @@ func (r *Raft) tick() {
 func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	// Your Code Here (2A).
 	if r.State == StateLeader {
-		log.Infof("raft:%d become follower at term:%d", r.id, r.Term)
+		//log.Infof("raft:%d become follower at term:%d", r.id, r.Term)
 	}
 	r.State = StateFollower
 	r.Term = term
 	r.Lead = lead
+	r.Vote = None
 	r.electionElapsed = 0 - rand.Intn(r.electionTimeout)
 	//log.Infof("raft:%d become follower at term:%d", r.id, r.Term)
 
@@ -374,9 +376,10 @@ func (r *Raft) becomeCandidate() {
 	r.votes = make(map[uint64]bool)
 	//给自己投票
 	r.votes[r.id] = true
+	r.Vote = r.id
 	r.electionElapsed = 0 - rand.Intn(r.electionTimeout)
 
-	log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
+	//log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
 }
 
 // becomeLeader transform this peer's state to leader
@@ -409,7 +412,7 @@ func (r *Raft) becomeLeader() {
 	r.bcastAppend()
 	//log.Infof("lastIndex:%d", r.RaftLog.LastIndex())
 
-	log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
+	//log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
 	//log.Info("raft log stabled:", r.RaftLog.stabled, "raft log commited:", r.RaftLog.committed, "raft log len entries", len(r.RaftLog.entries), "lastIndex", r.RaftLog.LastIndex())
 	//for i := 0; i < len(r.peers); i++ {
 	//	log.Info("id:", r.peers[i], "match:", r.Prs[r.peers[i]].Match, "next:", r.Prs[r.peers[i]].Next)
@@ -586,25 +589,12 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 		r.State = StateFollower
 		r.Term = m.Term
 	} else if m.Reject == true {
-		if int(r.Prs[m.From].Match)-1 >= 0 {
-			r.Prs[m.From].Match--
+		if m.Term <= r.Term {
+			next := r.Prs[m.From].Next - 1
+			r.Prs[m.From].Next = min(m.Index, next)
+			r.sendAppend(m.From)
+			return
 		}
-
-		if int(r.Prs[m.From].Next)-1 >= 1 {
-			r.Prs[m.From].Next--
-		}
-
-		if int(r.Prs[m.From].Match)-1 < 0 {
-			r.Prs[m.From].Match = 0
-
-		}
-
-		if int(r.Prs[m.From].Next)-1 <= 0 {
-			r.Prs[m.From].Next = 1
-		}
-
-		//log.Infof("id:%d reject leader match:%d next:%d", m.From, r.Prs[m.From].Match, r.Prs[m.From].Next)
-		r.sendAppend(m.From)
 
 	} else if m.Reject == false {
 
@@ -691,10 +681,6 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		r.Lead = m.From
 		r.State = StateFollower
 
-		//查找具体是在哪个位置匹配的 todo
-		//var PreIndex uint64
-
-		//var PreTerm uint64 = 0
 		for _, entry := range m.Entries {
 
 			lastIndex := r.RaftLog.LastIndex()
@@ -864,36 +850,50 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 		r.msgs = append(r.msgs, msg)
 		//任期小于节点本身的任期
 	case pb.MessageType_MsgHeartbeat:
-		if m.Term >= r.Term {
-			r.becomeFollower(m.Term, m.From)
+		if m.Term < r.Term {
+			msg := pb.Message{
+				MsgType: pb.MessageType_MsgHeartbeatResponse,
+				From:    r.id,
+				To:      m.From,
+				Term:    r.Term,
+				Reject:  true,
+				Commit:  r.RaftLog.committed,
+				Index:   r.RaftLog.stabled,
+			}
+			r.msgs = append(r.msgs, msg)
+			return
+		}
+
+		if m.Term > r.Term {
 			r.Term = m.Term
-			r.Lead = m.From
-			r.Vote = m.From
-			r.electionElapsed = 0
+		}
 
-			if m.Commit > r.RaftLog.committed {
-				msg := pb.Message{
-					MsgType: pb.MessageType_MsgHeartbeatResponse,
-					To:      m.From,
-					From:    r.id,
-					Term:    r.Term,
-					Commit:  r.RaftLog.committed,
-					Index:   r.RaftLog.LastIndex(),
-				}
+		r.becomeFollower(m.Term, m.From)
 
-				r.msgs = append(r.msgs, msg)
+		r.Lead = m.From
+		r.electionElapsed -= r.heartbeatTimeout
+		if m.Commit > r.RaftLog.committed {
+			msg := pb.Message{
+				MsgType: pb.MessageType_MsgHeartbeatResponse,
+				To:      m.From,
+				From:    r.id,
+				Term:    r.Term,
+				Commit:  r.RaftLog.committed,
+				Index:   r.RaftLog.stabled,
+				Reject:  false,
 			}
 
+			r.msgs = append(r.msgs, msg)
 		}
+
 	case pb.MessageType_MsgHeartbeatResponse:
 		if r.State != StateLeader {
 			return
 		}
 
-		r.Prs[m.From].Match = m.Index
-		r.Prs[m.From].Next = m.Index + 1
-
-		r.sendAppend(m.From)
+		if m.Reject || m.Commit < r.RaftLog.committed {
+			r.sendAppend(m.From)
+		}
 	}
 }
 
