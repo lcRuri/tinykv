@@ -16,6 +16,7 @@ package raft
 
 import (
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+	log "github.com/sirupsen/logrus"
 )
 
 // RaftLog manage the log entries, its struct look like:
@@ -58,6 +59,7 @@ type RaftLog struct {
 	// the incoming unstable snapshot, if any.
 	// (Used in 2C)
 	pendingSnapshot *pb.Snapshot
+	firstIndex      uint64
 
 	// Your Data Here (2A).
 }
@@ -69,15 +71,18 @@ func newLog(storage Storage) *RaftLog {
 	//从storage中取出消息
 	firstIndex, _ := storage.FirstIndex()
 	lastIndex, _ := storage.LastIndex()
-	//entries, _ := storage.Entries(firstIndex, lastIndex+1)
+	entries, _ := storage.Entries(firstIndex, lastIndex+1)
 	hardState, _, _ := storage.InitialState()
 
 	raftLog := &RaftLog{
 		storage:   storage,
 		committed: hardState.Commit,
 
-		applied: firstIndex - 1,
-		stabled: lastIndex,
+		applied:         firstIndex - 1,
+		stabled:         lastIndex,
+		entries:         entries,
+		pendingSnapshot: nil,
+		firstIndex:      firstIndex,
 	}
 
 	return raftLog
@@ -88,6 +93,11 @@ func newLog(storage Storage) *RaftLog {
 // grow unlimitedly in memory
 func (l *RaftLog) maybeCompact() {
 	// Your Code Here (2C).
+}
+
+func (l *RaftLog) Commited() uint64 {
+	// Your Code Here (2C).
+	return l.committed
 }
 
 // allEntries return all the entries not compacted.
@@ -151,35 +161,15 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
 	//todo
-
-	var partition uint64
-	if int(l.committed) > len(l.entries) {
-		//说明有一部分日志在storage中
-		//全部取出 和applied和commited比较大小
-		firstIndex, _ := l.storage.FirstIndex()
-		lastIndex, _ := l.storage.LastIndex()
-		entries, _ := l.storage.Entries(firstIndex, lastIndex+1)
-
-		for _, entry := range entries {
-			if entry.Index > l.applied && entry.Index <= l.committed {
-				ents = append(ents, entry)
-				partition = entry.Index
-			}
+	if len(l.entries) > 0 {
+		if l.committed-l.FirstIndex()+1 < 0 || l.applied-l.FirstIndex()+1 > l.LastIndex() {
+			return nil
 		}
-
-		//找到entries中提交了但是未applied的日志的索引
-		var index int
-		for i, entry := range l.entries {
-			if entry.Index > partition {
-				index = i
-				break
-			}
+		if l.applied-l.FirstIndex()+1 >= 0 && l.committed-l.FirstIndex()+1 <= uint64(len(l.entries)) {
+			return l.entries[l.applied-l.FirstIndex()+1 : l.committed-l.FirstIndex()+1]
 		}
-		ents = append(ents, l.entries[index:]...)
-	} else {
-		ents = append(ents, l.entries[l.applied:l.committed]...)
 	}
-	return ents
+	return nil
 
 }
 
@@ -209,13 +199,19 @@ func (l *RaftLog) Term(i uint64) (uint64, error) {
 		return 0, nil
 	}
 
-	index := i - l.stabled - 1
-	if index < uint64(len(l.entries)) {
-		return l.entries[i-l.stabled-1].Term, nil
+	if len(l.entries) > 0 {
+		if i >= l.FirstIndex() {
+			index := i - l.FirstIndex()
+			if index >= uint64(len(l.entries)) {
+				return 0, ErrUnavailable
+			}
+			return l.entries[index].Term, nil
+		}
 	}
 
 	term, err := l.storage.Term(i)
 	if err != nil {
+		log.Errorf("index:%d len(l.entries):%d ", i, len(l.entries))
 		panic(err)
 	}
 

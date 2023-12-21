@@ -165,6 +165,10 @@ type Raft struct {
 	PendingConfIndex uint64
 }
 
+func (r *Raft) Id() uint64 {
+	return r.id
+}
+
 func (r *Raft) SoftState() *SoftState {
 	return &SoftState{
 		Lead:      r.Lead,
@@ -246,7 +250,7 @@ func (r *Raft) sendAppend(to uint64) bool {
 	}
 
 	for i := 0; i < len(r.RaftLog.entries); i++ {
-		if r.Prs[to].Match < r.RaftLog.entries[i].Index {
+		if r.Prs[to].Next <= r.RaftLog.entries[i].Index {
 			entries = append(entries, &r.RaftLog.entries[i])
 		}
 	}
@@ -289,15 +293,11 @@ func (r *Raft) sendHeartbeat(to uint64) {
 		msg.MsgType = pb.MessageType_MsgRequestVote
 		//获取peer的匹配日志
 		msg.Index = r.Prs[to].Match
-		if msg.Index == 0 {
-			msg.LogTerm = 0
-		} else {
-			if msg.Index-1 >= uint64(len(r.RaftLog.entries)) || msg.Index-1 < 0 {
-				//fmt.Println("msg.Index", msg.Index, r.State, r.RaftLog.stabled)
-			}
+		lastIndex := r.RaftLog.LastIndex()
+		lastLogTerm, _ := r.RaftLog.Term(lastIndex)
 
-			msg.LogTerm = r.RaftLog.entries[msg.Index-1].Term
-		}
+		msg.Index = lastIndex
+		msg.LogTerm = lastLogTerm
 
 	}
 	if r.State == StateLeader {
@@ -315,7 +315,6 @@ func (r *Raft) tick() {
 	if len(r.peers) == 1 && r.State == StateFollower {
 		r.becomeCandidate()
 		r.becomeLeader()
-		r.bcastAppend()
 		return
 	}
 
@@ -374,7 +373,7 @@ func (r *Raft) becomeCandidate() {
 	r.votes[r.id] = true
 	r.electionElapsed = 0
 
-	log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
+	//log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
 }
 
 // becomeLeader transform this peer's state to leader
@@ -404,7 +403,10 @@ func (r *Raft) becomeLeader() {
 	r.Prs[r.id].Match = r.RaftLog.LastIndex()
 	r.Prs[r.id].Next = r.RaftLog.LastIndex() + 1
 
-	log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
+	r.bcastAppend()
+	//log.Infof("lastIndex:%d", r.RaftLog.LastIndex())
+
+	//log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
 	//log.Info("raft log stabled:", r.RaftLog.stabled, "raft log commited:", r.RaftLog.committed, "raft log len entries", len(r.RaftLog.entries), "lastIndex", r.RaftLog.LastIndex())
 	//for i := 0; i < len(r.peers); i++ {
 	//	log.Info("id:", r.peers[i], "match:", r.Prs[r.peers[i]].Match, "next:", r.Prs[r.peers[i]].Next)
@@ -429,7 +431,6 @@ func (r *Raft) Step(m pb.Message) error {
 	if len(r.peers) == 1 && r.State == StateFollower {
 		r.becomeCandidate()
 		r.becomeLeader()
-		r.bcastAppend()
 		return nil
 	}
 
@@ -499,7 +500,6 @@ func (r *Raft) Step(m pb.Message) error {
 
 			if granted > len(r.peers)/2 {
 				r.becomeLeader()
-				r.bcastAppend()
 			} else if len(r.votes)-granted == len(r.peers)/2+1 {
 				r.becomeFollower(r.Term, None)
 			}
@@ -677,7 +677,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 
 	term, err := r.RaftLog.Term(m.Index)
 	if err != nil {
-		log.Error(err)
+		panic(err)
 		msg.Reject = true
 		r.msgs = append(r.msgs, msg)
 		return
@@ -689,70 +689,83 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		r.State = StateFollower
 
 		//查找具体是在哪个位置匹配的 todo
-		var PreIndex uint64
+		//var PreIndex uint64
 
-		var PreTerm uint64 = 0
+		//var PreTerm uint64 = 0
 		for _, entry := range m.Entries {
 
 			lastIndex := r.RaftLog.LastIndex()
 
 			if entry.Index <= lastIndex {
-				PreTerm, err = r.RaftLog.Term(entry.Index)
+				//PreTerm, err = r.RaftLog.Term(entry.Index)
 				if err != nil {
 					log.Error(err)
 					panic(err)
 				}
+				Term, _ := r.RaftLog.Term(entry.Index)
+				//删除index相同但是term不同的日志 并且更改stabled
+				if Term != entry.Term {
+					firstIndex := r.RaftLog.FirstIndex()
+					//截断
+					if len(r.RaftLog.entries) != 0 && int64(m.Index-firstIndex+1) >= 0 {
+						r.RaftLog.entries = r.RaftLog.entries[0 : m.Index-firstIndex+1]
+					}
+					lastIndex = r.RaftLog.LastIndex()
+					r.RaftLog.entries = append(r.RaftLog.entries, *entry)
+					r.RaftLog.stabled = m.Index
+				}
 			} else {
 				// 超出了节点匹配的日志
-				PreIndex = entry.Index
-				break
+				r.RaftLog.entries = append(r.RaftLog.entries, *entry)
+
 			}
 
 			//fmt.Println("PreTerm:", PreTerm, "entry.Index:", entry.Index)
-			if PreTerm != entry.Term {
-				PreIndex = entry.Index
-				break
-			}
+			//if PreTerm != entry.Term {
+			//	PreIndex = entry.Index
+			//	break
+			//}
 
 		}
 
 		//fmt.Println("PreIndex:", PreIndex, "commited:", r.RaftLog.committed, "len entries", len(r.RaftLog.entries), "len m entries:", len(m.Entries), "stabled:", r.RaftLog.stabled, "m.Index:", m.Index, "preTerm:", PreTerm)
 		//判断PreIndex的情况
-		switch {
-		//不存在冲突
-		case PreIndex == 0:
-		//冲突的位置在已经提交的范围内 说明想要添加的日志有错 返回
-		case PreIndex <= r.RaftLog.committed:
-			msg.Reject = true
-		//在冲突的位置截断之前的日志
-		default:
-			//todo storage 和 entries
-
-			for i := 0; i < len(m.Entries); i++ {
-				if m.Entries[i].Index == PreIndex {
-					m.Entries = m.Entries[i:]
-					break
-				}
-			}
-			//m.Entries = m.Entries[PreIndex-m.Index-1:]
-			//截断的位置影响了stabled 就需要更改stabled
-			if r.RaftLog.stabled > PreIndex-1 {
-				r.RaftLog.stabled = PreIndex - 1
-			}
-
-			for _, entry := range m.Entries {
-				r.RaftLog.entries = append(r.RaftLog.entries, *entry)
-			}
-
-			for _, peer := range r.peers {
-				if peer == r.id {
-					continue
-				}
-				r.Prs[peer].Match = r.RaftLog.entries[len(r.RaftLog.entries)-1].Index
-				r.Prs[peer].Next = r.Prs[peer].Match + 1
-			}
-
-		}
+		//switch {
+		////不存在冲突
+		//case PreIndex == 0:
+		////冲突的位置在已经提交的范围内 说明想要添加的日志有错 返回
+		//case PreIndex <= r.RaftLog.committed:
+		//	//log.Infof("msg.Reject = true")
+		//	msg.Reject = true
+		////在冲突的位置截断之前的日志
+		//default:
+		//	//todo storage 和 entries
+		//
+		//	for i := 0; i < len(m.Entries); i++ {
+		//		if m.Entries[i].Index == PreIndex {
+		//			m.Entries = m.Entries[i:]
+		//			break
+		//		}
+		//	}
+		//	//m.Entries = m.Entries[PreIndex-m.Index-1:]
+		//	//截断的位置影响了stabled 就需要更改stabled
+		//	if r.RaftLog.stabled > PreIndex-1 {
+		//		r.RaftLog.stabled = PreIndex - 1
+		//	}
+		//
+		//	for _, entry := range m.Entries {
+		//		r.RaftLog.entries = append(r.RaftLog.entries, *entry)
+		//	}
+		//
+		//	for _, peer := range r.peers {
+		//		if peer == r.id {
+		//			continue
+		//		}
+		//		r.Prs[peer].Match = r.RaftLog.entries[len(r.RaftLog.entries)-1].Index
+		//		r.Prs[peer].Next = r.Prs[peer].Match + 1
+		//	}
+		//
+		//}
 
 		//更新commited
 		if m.Commit > r.RaftLog.committed {
@@ -764,6 +777,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		}
 	} else {
 		//Println("id:", r.id, "reject ", "m.term:", m.Term, "r.term:", r.Term, "term:", term, "m.logTerm:", m.LogTerm, "m.index", m.Index)
+		//log.Infof("msg.Reject = true")
 		msg.Reject = true
 	}
 
@@ -818,7 +832,7 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 					term, _ := r.RaftLog.storage.Term(lastIndex)
 					entries, _ := r.RaftLog.storage.Entries(firstIndex, lastIndex+1)
 					if m.LogTerm < term {
-						log.Infof("aaaaaaaaaaaaa")
+						//log.Infof("aaaaaaaaaaaaa")
 						m.Reject = true
 					} else if m.LogTerm == term {
 						if m.Index < entries[len(entries)-1].Index {
