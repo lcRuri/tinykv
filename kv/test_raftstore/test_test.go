@@ -31,7 +31,6 @@ func runClient(t *testing.T, me int, ca chan bool, fn func(me int, t *testing.T)
 // spawn ncli clients and wait until they are all done
 func SpawnClientsAndWait(t *testing.T, ch chan bool, ncli int, fn func(me int, t *testing.T)) {
 	defer func() {
-		log.Infof("ch_clients<-")
 		ch <- true
 	}()
 	ca := make([]chan bool, ncli)

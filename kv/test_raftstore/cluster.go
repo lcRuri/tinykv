@@ -190,6 +190,7 @@ func (c *Cluster) Request(key []byte, reqs []*raft_cmdpb.Request, timeout time.D
 	for i := 0; i < 10 || time.Since(startTime) < timeout; i++ {
 		region := c.GetRegion(key)
 		regionID := region.GetId()
+		//println("No.", i, "Request", "length of req:", len(reqs))
 		req := NewRequest(regionID, region.RegionEpoch, reqs)
 		resp, txn := c.CallCommandOnLeader(&req, timeout)
 		if resp == nil {
@@ -218,6 +219,7 @@ func (c *Cluster) CallCommandOnLeader(request *raft_cmdpb.RaftCmdRequest, timeou
 	leader := c.LeaderOfRegion(regionID)
 	for {
 		if time.Since(startTime) > timeout {
+			log.Infof("return")
 			return nil, nil
 		}
 		if leader == nil {
@@ -225,10 +227,11 @@ func (c *Cluster) CallCommandOnLeader(request *raft_cmdpb.RaftCmdRequest, timeou
 		}
 		request.Header.Peer = leader
 		// todo lab2b problem
-		//log.Infof("type:%v", request.Requests)
+		//log.Infof("before c.CallCommand")
 		resp, txn := c.CallCommand(request, 1*time.Second)
+		//log.Infof("after c.CallCommand")
 		if resp == nil {
-			log.Infof("can't call command %s on leader %d of region %d", request.String(), leader.GetId(), regionID)
+			log.Infof("can't call command %s on leader %d of region %d request.Requests:%v", request.String(), leader.GetId(), regionID, request.Requests)
 			newLeader := c.LeaderOfRegion(regionID)
 			if leader == newLeader {
 				region, _, err := c.schedulerClient.GetRegionByID(context.TODO(), regionID)
@@ -243,6 +246,7 @@ func (c *Cluster) CallCommandOnLeader(request *raft_cmdpb.RaftCmdRequest, timeou
 				log.Infof("use new leader %d of region %d", leader.GetId(), regionID)
 			}
 			continue
+			log.Infof("b")
 		}
 		if resp.Header.Error != nil {
 			err := resp.Header.Error

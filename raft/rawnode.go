@@ -215,6 +215,7 @@ func (rn *RawNode) HasReady() bool {
 func (rn *RawNode) Advance(rd Ready) {
 	// Your Code Here (2A).
 	//applied rd中的entries 并且更改对应的状态
+	//log.Infof("advance")
 	if !IsEmptyHardState(rd.HardState) {
 		rn.preHardState = &rd.HardState
 	}

@@ -317,38 +317,28 @@ func (ps *PeerStorage) Append(entries []eraftpb.Entry, raftWB *engine_util.Write
 	if len(entries) == 0 {
 		return nil
 	}
+	entFirstIndex := entries[0].Index
+	entLastIndex := entries[len(entries)-1].Index
+	wbFirstIndex, _ := ps.FirstIndex()
+	wbLastIndex, _ := ps.LastIndex()
 
-	lastIndex, err := ps.LastIndex()
-	if err != nil {
-		return err
-	}
-
-	pos := 0
-
-	for _, entry := range entries {
-		if entry.Index > lastIndex {
-			break
-		}
-		pos++
-	}
-
-	entries = entries[pos:]
-	if len(entries) == 0 {
+	if entLastIndex < wbFirstIndex {
 		return nil
 	}
-
-	raftdb := ps.Engines.Raft
-	regionId := ps.region.Id
-	for _, entry := range entries {
-
-		logIndex := entry.Index
-		key := meta.RaftLogKey(regionId, logIndex)
-
-		raftWB.SetMeta(key, &entry)
+	// if entLastIndex > wbLastIndex + 1 { return nil }
+	if entFirstIndex < wbFirstIndex {
+		entries = entries[wbFirstIndex-entFirstIndex:]
 	}
-
-	raftWB.WriteToDB(raftdb)
-
+	// Append the given entries to the raft log
+	for _, entry := range entries {
+		_ = raftWB.SetMeta(meta.RaftLogKey(ps.region.Id, entry.Index), &entry)
+	}
+	// delete log entries that will never be committed
+	if entLastIndex < wbLastIndex {
+		for i := entLastIndex + 1; i <= wbLastIndex; i++ {
+			raftWB.DeleteMeta(meta.RaftLogKey(ps.region.Id, i))
+		}
+	}
 	return nil
 }
 

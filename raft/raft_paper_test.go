@@ -700,7 +700,7 @@ func TestFollowerAppendEntries2AB(t *testing.T) {
 		for _, ent := range tt.wents {
 			wents = append(wents, *ent)
 		}
-		if g := r.RaftLog.allEntries(); !reflect.DeepEqual(g, wents) {
+		if g := r.RaftLog.entries; !reflect.DeepEqual(g, wents) {
 			t.Errorf("#%d: ents = %+v,\n                          want %+v", i, g, wents)
 		}
 		var wunstable []pb.Entry
@@ -830,7 +830,7 @@ func TestVoteRequest2AB(t *testing.T) {
 		})
 		r.readMessages()
 
-		// 成为leader的过程
+		// 成为StateCandidate的过程
 		for r.State != StateCandidate {
 			r.tick()
 		}

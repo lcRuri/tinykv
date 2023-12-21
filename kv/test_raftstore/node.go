@@ -215,7 +215,7 @@ func (c *NodeSimulator) CallCommandOnStore(storeID uint64, request *raft_cmdpb.R
 	if err != nil {
 		return nil, nil
 	}
-
+	//log.Infof("da")
 	resp := cb.WaitRespWithTimeout(timeout)
 	return resp, cb.Txn
 }

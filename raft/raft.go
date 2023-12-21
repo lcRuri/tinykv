@@ -194,6 +194,10 @@ func newRaft(c *Config) *Raft {
 	if err != nil {
 		panic(err)
 	}
+
+	if c.peers == nil {
+		c.peers = confstate.Nodes
+	}
 	raft := &Raft{
 		//2AA
 		id:               c.ID,
@@ -212,12 +216,9 @@ func newRaft(c *Config) *Raft {
 		Prs:     make(map[uint64]*Progress), // map[uint64]*Progress{}
 	}
 
-	if c.peers == nil {
-		raft.peers = confstate.Nodes
-	}
-
-	for _, peer := range raft.peers {
-		raft.Prs[peer] = &Progress{Match: 0, Next: 1}
+	lastIndex := raft.RaftLog.LastIndex()
+	for _, peer := range c.peers {
+		raft.Prs[peer] = &Progress{Next: lastIndex + 1, Match: 0}
 	}
 
 	if c.Applied > 0 {
@@ -379,7 +380,7 @@ func (r *Raft) becomeCandidate() {
 	r.Vote = r.id
 	r.electionElapsed = 0 - rand.Intn(r.electionTimeout)
 
-	//log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
+	log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
 }
 
 // becomeLeader transform this peer's state to leader
@@ -412,7 +413,7 @@ func (r *Raft) becomeLeader() {
 	r.bcastAppend()
 	//log.Infof("lastIndex:%d", r.RaftLog.LastIndex())
 
-	//log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
+	log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
 	//log.Info("raft log stabled:", r.RaftLog.stabled, "raft log commited:", r.RaftLog.committed, "raft log len entries", len(r.RaftLog.entries), "lastIndex", r.RaftLog.LastIndex())
 	//for i := 0; i < len(r.peers); i++ {
 	//	log.Info("id:", r.peers[i], "match:", r.Prs[r.peers[i]].Match, "next:", r.Prs[r.peers[i]].Next)
@@ -497,17 +498,19 @@ func (r *Raft) Step(m pb.Message) error {
 			}
 
 			granted := 0
-
+			denials := 0
 			for _, vote := range r.votes {
 				if vote {
 					granted++
+				} else {
+					denials++
 				}
 			}
 
 			if granted > len(r.peers)/2 {
 				r.becomeLeader()
-			} else if len(r.votes)-granted == len(r.peers)/2+1 {
-				r.becomeFollower(r.Term, None)
+			} else if denials > len(r.peers)/2 {
+				r.becomeFollower(r.Term, m.From)
 			}
 		}
 

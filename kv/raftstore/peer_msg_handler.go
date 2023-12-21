@@ -47,13 +47,18 @@ func (d *peerMsgHandler) HandleRaftReady() {
 	}
 	// Your Code Here (2B).
 	//todo
-
+	//log.Infof("in")
 	if !d.RaftGroup.HasReady() {
+		//log.Infof("!d.RaftGroup.HasReady() ")
 		return
 	}
 
 	ready := d.RaftGroup.Ready()
+	//if d.RaftGroup.Raft.Id() == d.RaftGroup.Raft.Lead {
+	//	log.Infof("id:%d raft:%d,lead:%d", d.RaftGroup.Raft.Id(), d.RaftGroup.Raft.RaftLog.LastIndex(), d.RaftGroup.Raft.Lead)
+	//}
 	result, err := d.peerStorage.SaveReadyState(&ready)
+	//log.Infof("ooo,len(ready.CommittedEntries):%d,raft committed:%d", len(ready.CommittedEntries), d.RaftGroup.Raft.RaftLog.Commited())
 	if err != nil {
 		return
 	}
@@ -71,6 +76,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 	}
 
 	if len(ready.CommittedEntries) > 0 {
+		//log.Infof("process:%d", d.RaftGroup.Raft.Id())
 		for _, entry := range ready.CommittedEntries {
 			kvWB := new(engine_util.WriteBatch)
 			d.process(&entry, kvWB)
@@ -85,6 +91,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 			if err != nil {
 				panic(err)
 			}
+
 		}
 	}
 	d.RaftGroup.Advance(ready)
@@ -158,45 +165,55 @@ func (d *peerMsgHandler) preProposeRaftCommand(req *raft_cmdpb.RaftCmdRequest) e
 func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *message.Callback) {
 	err := d.preProposeRaftCommand(msg)
 	if err != nil {
+		log.Infof("err:%s", err.Error())
 		cb.Done(ErrResp(err))
 		return
 	}
 
-	if len(msg.Requests) != 0 {
-		log.Infof("edcbb")
-		req := msg.Requests[0]
-		var key []byte
-		//根据msg类型不同进行处理
-		switch req.CmdType {
-		case raft_cmdpb.CmdType_Get:
-			key = req.Get.Key
-		case raft_cmdpb.CmdType_Put:
-			key = req.Put.Key
-		case raft_cmdpb.CmdType_Delete:
-			key = req.Delete.Key
-		case raft_cmdpb.CmdType_Snap:
-		}
-		log.Infof("erff")
-		err = util.CheckKeyInRegion(key, d.Region())
-		if err != nil && req.CmdType != raft_cmdpb.CmdType_Snap {
-			cb.Done(ErrResp(err))
-			return
-		}
-		data, err1 := msg.Marshal()
-		if err1 != nil && data != nil {
-			panic(err)
-		}
-		p := &proposal{index: d.nextProposalIndex(), term: d.Term(), cb: cb}
-
-		println("Propose No.", d.nextProposalIndex(), "proposal")
-		d.proposals = append(d.proposals, p)
-		err = d.RaftGroup.Propose(data)
-		if err != nil {
-			log.Infof("err:%v", err.Error())
-		}
-
+	//if len(msg.Requests) != 0 {
+	//	for len(msg.Requests) > 0 {
+	//log.Infof("handle proposeRaftCommand")
+	//if len(msg.Requests) != 0 {
+	//	for len(msg.Requests) > 0 {
+	req := msg.Requests[0]
+	var key []byte
+	//根据msg类型不同进行处理
+	//log.Infof("req.CmdType:%v", req.CmdType)
+	switch req.CmdType {
+	case raft_cmdpb.CmdType_Get:
+		key = req.Get.Key
+	case raft_cmdpb.CmdType_Put:
+		key = req.Put.Key
+	case raft_cmdpb.CmdType_Delete:
+		key = req.Delete.Key
+	case raft_cmdpb.CmdType_Snap:
 	}
+	err = util.CheckKeyInRegion(key, d.Region())
+	if err != nil && req.CmdType != raft_cmdpb.CmdType_Snap {
+		cb.Done(ErrResp(err))
+		//msg.Requests = msg.Requests[1:]
+		return
+	}
+	data, err1 := msg.Marshal()
+	if err1 != nil && data != nil {
+		panic(err)
+	}
+	p := &proposal{index: d.nextProposalIndex(), term: d.Term(), cb: cb}
+
+	//log.Infof("Propose No.", d.nextProposalIndex(), "proposal")
+	d.proposals = append(d.proposals, p)
+	err = d.RaftGroup.Propose(data)
+	if err != nil {
+		panic(err)
+	}
+	//msg.Requests = msg.Requests[1:]
 }
+
+//} else {
+//	log.Infof("msg:%v", msg)
+//}
+
+//}
 
 func (d *peerMsgHandler) onTick() {
 	if d.stopped {
@@ -644,11 +661,11 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 		req := msg.Requests[0]
 		switch req.CmdType {
 		case raft_cmdpb.CmdType_Get:
-
 		case raft_cmdpb.CmdType_Put:
 			kvWB.SetCF(req.Put.Cf, req.Put.Key, req.Put.Value)
 		case raft_cmdpb.CmdType_Delete:
 			kvWB.DeleteCF(req.Delete.Cf, req.Delete.Key)
+			//log.Infof("delete key:%s", string(req.Delete.Key))
 		case raft_cmdpb.CmdType_Snap:
 		}
 
@@ -659,6 +676,7 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 				p.cb.Done(ErrResp(&util.ErrStaleCommand{}))
 				d.proposals = d.proposals[1:]
 				if len(d.proposals) == 0 {
+					log.Infof("nilllll")
 					return
 				}
 				p = d.proposals[0]
@@ -669,12 +687,15 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 					log.Infof(" p.term != entry.Term")
 					NotifyStaleReq(entry.Term, p.cb)
 				} else {
-					log.Infof("process")
 					resp := &raft_cmdpb.RaftCmdResponse{Header: &raft_cmdpb.RaftResponseHeader{}}
 
 					switch req.CmdType {
 					case raft_cmdpb.CmdType_Get:
-						value, _ := engine_util.GetCF(d.peerStorage.Engines.Kv, req.Get.Cf, req.Get.Key)
+						value, err := engine_util.GetCF(d.peerStorage.Engines.Kv, req.Get.Cf, req.Get.Key)
+						if err != nil {
+							p.cb.Done(ErrResp(err))
+							return
+						}
 						resp.Responses = []*raft_cmdpb.Response{{CmdType: raft_cmdpb.CmdType_Get,
 							Get: &raft_cmdpb.GetResponse{Value: value}}}
 					case raft_cmdpb.CmdType_Put:
@@ -695,13 +716,15 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 						//log.Infof("Region:%v", d.Region())
 					}
 					p.cb.Done(resp)
-					log.Infof("resp")
+					//log.Infof("resp")
 				}
 				d.proposals = d.proposals[1:]
 			} else {
 				//log.Infof("p.index:%d entry.index:%d", p.index, entry.Index)
 			}
 		}
+	} else {
+		//log.Infof("nil %d", d.RaftGroup.Raft.Id())
 	}
 }
 
