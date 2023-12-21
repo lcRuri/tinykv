@@ -169,15 +169,15 @@ func (r *Raft) Id() uint64 {
 	return r.id
 }
 
-func (r *Raft) SoftState() *SoftState {
+func (r *Raft) softState() *SoftState {
 	return &SoftState{
 		Lead:      r.Lead,
 		RaftState: r.State,
 	}
 }
 
-func (r *Raft) HardState() *pb.HardState {
-	return &pb.HardState{
+func (r *Raft) hardState() pb.HardState {
+	return pb.HardState{
 		Term:   r.Term,
 		Vote:   r.Vote,
 		Commit: r.RaftLog.committed,
