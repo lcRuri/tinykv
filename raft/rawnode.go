@@ -76,7 +76,7 @@ type RawNode struct {
 	Raft *Raft
 	// Your Data Here (2A).
 	preSoftState *SoftState
-	preHardState *pb.HardState
+	preHardState pb.HardState
 }
 
 // NewRawNode returns a new RawNode given configuration and a list of raft peers.
@@ -84,8 +84,8 @@ type RawNode struct {
 func NewRawNode(config *Config) (*RawNode, error) {
 	// Your Code Here (2A).
 	raft := newRaft(config)
-	softstate := raft.SoftState()
-	hardState := raft.HardState()
+	softstate := raft.softState()
+	hardState := raft.hardState()
 	return &RawNode{Raft: raft, preHardState: hardState, preSoftState: softstate}, nil
 }
 
@@ -162,16 +162,16 @@ func (rn *RawNode) Ready() Ready {
 		Messages:         rn.Raft.msgs,
 	}
 
-	curSoftState := rn.Raft.SoftState()
+	curSoftState := rn.Raft.softState()
 	if !(curSoftState.Lead == rn.preSoftState.Lead &&
 		curSoftState.RaftState == rn.preSoftState.RaftState) {
 		ready.SoftState = curSoftState
 		rn.preSoftState = curSoftState
 	}
 
-	curHardState := rn.Raft.HardState()
-	if !isHardStateEqual(*curHardState, *rn.preHardState) {
-		ready.HardState = *curHardState
+	curHardState := rn.Raft.hardState()
+	if !isHardStateEqual(curHardState, rn.preHardState) {
+		ready.HardState = curHardState
 		// rn.prevHardState = curHardState
 	}
 
@@ -183,15 +183,15 @@ func (rn *RawNode) Ready() Ready {
 // 如果有ready要处理那么就不能调用Ready 需要等处理完之后再调用
 func (rn *RawNode) HasReady() bool {
 	// Your Code Here (2A).
-	curSoftState := rn.Raft.SoftState()
+	curSoftState := rn.Raft.softState()
 	if !(curSoftState.Lead == rn.preSoftState.Lead &&
 		curSoftState.RaftState == rn.preSoftState.RaftState) {
 		return true
 	}
 
-	curhardState := rn.Raft.HardState()
-	if !IsEmptyHardState(*curhardState) &&
-		!isHardStateEqual(*curhardState, *rn.preHardState) {
+	curhardState := rn.Raft.hardState()
+	if !IsEmptyHardState(curhardState) &&
+		!isHardStateEqual(curhardState, rn.preHardState) {
 		return true
 	}
 
@@ -217,7 +217,7 @@ func (rn *RawNode) Advance(rd Ready) {
 	//applied rd中的entries 并且更改对应的状态
 	//log.Infof("advance")
 	if !IsEmptyHardState(rd.HardState) {
-		rn.preHardState = &rd.HardState
+		rn.preHardState = rd.HardState
 	}
 	if len(rd.Entries) > 0 {
 		rn.Raft.RaftLog.stabled = rd.Entries[len(rd.Entries)-1].Index
