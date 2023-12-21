@@ -318,27 +318,26 @@ func (r *Raft) tick() {
 		return
 	}
 
-	//todo
-	random := rand.Intn(20)
 	// Your Code Here (2A).
 	switch r.State {
 	//维护electionElapsed
 	case StateFollower:
 		r.electionElapsed++
-		if r.electionElapsed >= r.electionTimeout+random {
+		if r.electionElapsed >= r.electionTimeout {
+			r.electionElapsed = 0 - rand.Intn(r.electionTimeout)
+
+			msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, To: r.id}
+			//将msg发送到本地的msgs,msgHup表示start a new election.
+			r.Step(msg)
+		}
+	case StateCandidate:
+		r.electionElapsed++
+		if r.electionElapsed >= r.electionTimeout {
+			r.electionElapsed = 0 - rand.Intn(r.electionTimeout)
 			msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, To: r.id}
 			//将msg发送到本地的msgs,msgHup表示start a new election.
 			r.Step(msg)
 
-			r.electionElapsed = 0
-		}
-	case StateCandidate:
-		r.electionElapsed++
-		if r.electionElapsed >= r.electionTimeout+random {
-			msg := pb.Message{MsgType: pb.MessageType_MsgHup, From: r.id, To: r.id}
-			//将msg发送到本地的msgs,msgHup表示start a new election.
-			r.Step(msg)
-			r.electionElapsed = 0
 		}
 
 	//维护heartElapsed
@@ -346,9 +345,9 @@ func (r *Raft) tick() {
 		r.heartbeatElapsed++
 		//当heartbeatElapsed超过heartbeatTimeout，发送心跳
 		if r.heartbeatElapsed >= r.heartbeatTimeout {
+			r.electionElapsed = 0
 			msg := pb.Message{MsgType: pb.MessageType_MsgBeat}
 			r.Step(msg)
-			r.electionElapsed = 0
 		}
 	}
 }
@@ -356,9 +355,13 @@ func (r *Raft) tick() {
 // becomeFollower transform this peer's state to Follower
 func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	// Your Code Here (2A).
+	if r.State == StateLeader {
+		log.Infof("raft:%d become follower at term:%d", r.id, r.Term)
+	}
 	r.State = StateFollower
 	r.Term = term
 	r.Lead = lead
+	r.electionElapsed = 0 - rand.Intn(r.electionTimeout)
 	//log.Infof("raft:%d become follower at term:%d", r.id, r.Term)
 
 }
@@ -371,9 +374,9 @@ func (r *Raft) becomeCandidate() {
 	r.votes = make(map[uint64]bool)
 	//给自己投票
 	r.votes[r.id] = true
-	r.electionElapsed = 0
+	r.electionElapsed = 0 - rand.Intn(r.electionTimeout)
 
-	//log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
+	log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
 }
 
 // becomeLeader transform this peer's state to leader
@@ -406,7 +409,7 @@ func (r *Raft) becomeLeader() {
 	r.bcastAppend()
 	//log.Infof("lastIndex:%d", r.RaftLog.LastIndex())
 
-	//log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
+	log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
 	//log.Info("raft log stabled:", r.RaftLog.stabled, "raft log commited:", r.RaftLog.committed, "raft log len entries", len(r.RaftLog.entries), "lastIndex", r.RaftLog.LastIndex())
 	//for i := 0; i < len(r.peers); i++ {
 	//	log.Info("id:", r.peers[i], "match:", r.Prs[r.peers[i]].Match, "next:", r.Prs[r.peers[i]].Next)
@@ -809,51 +812,56 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 	case pb.MessageType_MsgRequestVote:
 
 		//消息的任期大于节点本身
-		if m.Term > r.Term || r.Vote == m.From || r.Vote == None {
-			msg := pb.Message{}
-			r.becomeFollower(m.Term, None)
-			r.Term = m.Term
-			r.Vote = m.From
-			r.electionElapsed = 0
-
-			//判断日志
-			if len(r.RaftLog.entries) > 0 {
-				if m.LogTerm < r.RaftLog.entries[len(r.RaftLog.entries)-1].Term {
-					m.Reject = true
-				} else if m.LogTerm == r.RaftLog.entries[len(r.RaftLog.entries)-1].Term {
-					if m.Index < r.RaftLog.entries[len(r.RaftLog.entries)-1].Index {
-						m.Reject = true
-					}
-				}
-			} else if r.RaftLog.stabled >= 1 {
-				firstIndex, _ := r.RaftLog.storage.FirstIndex()
-				lastIndex, _ := r.RaftLog.storage.LastIndex()
-				if firstIndex <= lastIndex {
-					term, _ := r.RaftLog.storage.Term(lastIndex)
-					entries, _ := r.RaftLog.storage.Entries(firstIndex, lastIndex+1)
-					if m.LogTerm < term {
-						//log.Infof("aaaaaaaaaaaaa")
-						m.Reject = true
-					} else if m.LogTerm == term {
-						if m.Index < entries[len(entries)-1].Index {
-							m.Reject = true
-						}
-					}
-				}
-
+		if m.Term < r.Term {
+			msg := pb.Message{
+				MsgType: pb.MessageType_MsgRequestVoteResponse,
+				From:    r.id,
+				To:      m.From,
+				Term:    r.Term,
+				Reject:  true,
 			}
-
-			//返回响应
-			msg = pb.Message{MsgType: pb.MessageType_MsgRequestVoteResponse, From: r.id, To: m.From, Term: m.Term, Reject: m.Reject}
-			//log.Infof("raft:%d receive reqvote from %d vote", r.id, m.From)
 			r.msgs = append(r.msgs, msg)
+			return
 		}
-		if (m.Term == r.Term && r.Vote != m.From) || r.Term > m.Term {
-			msg := pb.Message{MsgType: pb.MessageType_MsgRequestVoteResponse, From: r.id, To: m.From, Term: r.Term, Reject: true}
-			//log.Infof("raft:%d receive reqvote from %d novote", r.id, m.From)
-			r.msgs = append(r.msgs, msg)
+		if r.State != StateFollower && m.Term > r.Term {
+			r.becomeFollower(m.Term, None)
 		}
-
+		if r.Term < m.Term {
+			r.Vote = None
+			r.Term = m.Term
+		}
+		// If votedFor is null or candidateId
+		if r.Vote == None || r.Vote == m.From {
+			// when sender's last term is greater than receiver's term
+			// or sender's last term is equal to receiver's term
+			// but sender's last index is greater than or equal to follower's.
+			lastIndex := r.RaftLog.LastIndex()
+			lastTerm, _ := r.RaftLog.Term(lastIndex)
+			if m.LogTerm > lastTerm ||
+				(m.LogTerm == lastTerm && m.Index >= lastIndex) {
+				r.Vote = m.From
+				if r.Term < m.Term {
+					r.Term = m.Term
+				}
+				msg := pb.Message{
+					MsgType: pb.MessageType_MsgRequestVoteResponse,
+					From:    r.id,
+					To:      m.From,
+					Term:    r.Term,
+					Reject:  false,
+				}
+				r.msgs = append(r.msgs, msg)
+				return
+			}
+		}
+		msg := pb.Message{
+			MsgType: pb.MessageType_MsgRequestVoteResponse,
+			From:    r.id,
+			To:      m.From,
+			Term:    r.Term,
+			Reject:  true,
+		}
+		r.msgs = append(r.msgs, msg)
 		//任期小于节点本身的任期
 	case pb.MessageType_MsgHeartbeat:
 		if m.Term >= r.Term {
