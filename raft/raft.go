@@ -632,18 +632,6 @@ func (r *Raft) maybeCommit(newCommited uint64) bool {
 	term, _ := r.RaftLog.Term(newCommited)
 
 	if newCommited > r.RaftLog.committed && term == r.Term {
-		//if r.RaftLog.stabled > 0 {
-		//	firstIndex, _ := r.RaftLog.storage.FirstIndex()
-		//	lastIndex, _ := r.RaftLog.storage.LastIndex()
-		//	entries, _ := r.RaftLog.storage.Entries(firstIndex, lastIndex+1)
-		//	entries = append(entries, r.RaftLog.entries...)
-		//
-		//	for i := int(r.RaftLog.committed); i < len(entries); i++ {
-		//		if entries[i].Term != r.Term {
-		//			return false
-		//		}
-		//	}
-		//}
 		//fmt.Println("change", "newCommited", newCommited, " r.RaftLog.committed", r.RaftLog.committed)
 		r.changeCommited(newCommited)
 		return true
@@ -665,12 +653,6 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	//If AppendEntries RPC received from new leader: convert to follower
 	r.heartbeatTimeout = 0
 	msg := pb.Message{MsgType: pb.MessageType_MsgAppendResponse, From: r.id, To: m.From, Index: m.Index, Term: r.Term}
-
-	//if m.Index > r.RaftLog.LastIndex() {
-	//	msg.Reject = true
-	//	r.msgs = append(r.msgs, msg)
-	//	return
-	//}
 
 	term, err := r.RaftLog.Term(m.Index)
 	if err != nil {
@@ -713,52 +695,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 
 			}
 
-			//fmt.Println("PreTerm:", PreTerm, "entry.Index:", entry.Index)
-			//if PreTerm != entry.Term {
-			//	PreIndex = entry.Index
-			//	break
-			//}
-
 		}
-
-		//fmt.Println("PreIndex:", PreIndex, "commited:", r.RaftLog.committed, "len entries", len(r.RaftLog.entries), "len m entries:", len(m.Entries), "stabled:", r.RaftLog.stabled, "m.Index:", m.Index, "preTerm:", PreTerm)
-		//判断PreIndex的情况
-		//switch {
-		////不存在冲突
-		//case PreIndex == 0:
-		////冲突的位置在已经提交的范围内 说明想要添加的日志有错 返回
-		//case PreIndex <= r.RaftLog.committed:
-		//	//log.Infof("msg.Reject = true")
-		//	msg.Reject = true
-		////在冲突的位置截断之前的日志
-		//default:
-		//	//todo storage 和 entries
-		//
-		//	for i := 0; i < len(m.Entries); i++ {
-		//		if m.Entries[i].Index == PreIndex {
-		//			m.Entries = m.Entries[i:]
-		//			break
-		//		}
-		//	}
-		//	//m.Entries = m.Entries[PreIndex-m.Index-1:]
-		//	//截断的位置影响了stabled 就需要更改stabled
-		//	if r.RaftLog.stabled > PreIndex-1 {
-		//		r.RaftLog.stabled = PreIndex - 1
-		//	}
-		//
-		//	for _, entry := range m.Entries {
-		//		r.RaftLog.entries = append(r.RaftLog.entries, *entry)
-		//	}
-		//
-		//	for _, peer := range r.peers {
-		//		if peer == r.id {
-		//			continue
-		//		}
-		//		r.Prs[peer].Match = r.RaftLog.entries[len(r.RaftLog.entries)-1].Index
-		//		r.Prs[peer].Next = r.Prs[peer].Match + 1
-		//	}
-		//
-		//}
 
 		//更新commited
 		if m.Commit > r.RaftLog.committed {
@@ -904,6 +841,26 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 // handleSnapshot handle Snapshot RPC request
 func (r *Raft) handleSnapshot(m pb.Message) {
 	// Your Code Here (2C).
+	r.RaftLog.applied = m.Snapshot.Metadata.Index
+	if r.RaftLog.committed < m.Snapshot.Metadata.Index {
+		r.RaftLog.committed = m.Snapshot.Metadata.Index
+		r.RaftLog.stabled = m.Snapshot.Metadata.Index
+	}
+
+	if r.Term < m.Snapshot.Metadata.Term {
+		r.Term = m.Term
+	}
+
+	nds := m.Snapshot.Metadata.ConfState.Nodes
+
+	for _, nd := range nds {
+		// 当前节点没有快照中的节点
+		if _, ok := r.Prs[nd]; !ok {
+			r.Prs[nd] = &Progress{Match: 0, Next: r.RaftLog.LastIndex() + 1}
+		}
+	}
+
+	r.RaftLog.pendingSnapshot = m.Snapshot
 }
 
 // addNode add a new node to raft group
