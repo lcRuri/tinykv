@@ -237,17 +237,34 @@ func (r *Raft) sendAppend(to uint64) bool {
 	if r.State != StateLeader {
 		return false
 	}
+
+	if r.RaftLog.pendingSnapshot != nil {
+		if r.RaftLog.pendingSnapshot.Metadata.Index > r.Prs[to].Next {
+			r.msgs = append(r.msgs, pb.Message{
+				MsgType: pb.MessageType_MsgSnapshot,
+				To:      to,
+				From:    r.id,
+			})
+
+			return true
+		}
+	}
+
 	entries := make([]*pb.Entry, 0)
-	//todo 12.6 添加在storage中的日志 根据next来选择
+
 	//起始是leader的Prs里面存储的当前peer的下一条日志的位置
 	if r.Prs[to].Next <= r.RaftLog.stabled {
 		lastIndex, _ := r.RaftLog.storage.LastIndex()
-		e, _ := r.RaftLog.storage.Entries(r.Prs[to].Next, lastIndex+1)
-		for i, entry := range e {
-			if entry.Index >= r.Prs[to].Next {
-				entries = append(entries, &e[i])
-			}
 
+		//说明日志在快照里面
+		if lastIndex >= r.Prs[to].Next {
+			e, _ := r.RaftLog.storage.Entries(r.Prs[to].Next, lastIndex+1)
+			for i, entry := range e {
+				if entry.Index >= r.Prs[to].Next {
+					entries = append(entries, &e[i])
+				}
+
+			}
 		}
 	}
 
@@ -467,6 +484,10 @@ func (r *Raft) Step(m pb.Message) error {
 			//fmt.Println("append follower", "r.id", r.id)
 			r.handleAppendEntries(m)
 		}
+
+		if m.MsgType == pb.MessageType_MsgSnapshot {
+			r.handleSnapshot(m)
+		}
 	case StateCandidate:
 		//发起投票
 		if m.MsgType == pb.MessageType_MsgHup {
@@ -570,12 +591,12 @@ func (r *Raft) Step(m pb.Message) error {
 			}
 
 			//向其他的节点发送添加日志请求
-			for _, peer := range r.peers {
-				if peer == r.id {
+			for id := range r.Prs {
+				if id == r.id {
 					continue
 				}
 
-				r.sendAppend(peer)
+				r.sendAppend(id)
 			}
 		}
 
@@ -841,6 +862,8 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 // handleSnapshot handle Snapshot RPC request
 func (r *Raft) handleSnapshot(m pb.Message) {
 	// Your Code Here (2C).
+	r.Lead = m.From
+
 	r.RaftLog.applied = m.Snapshot.Metadata.Index
 	if r.RaftLog.committed < m.Snapshot.Metadata.Index {
 		r.RaftLog.committed = m.Snapshot.Metadata.Index
@@ -853,11 +876,9 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 
 	nds := m.Snapshot.Metadata.ConfState.Nodes
 
+	r.Prs = make(map[uint64]*Progress)
 	for _, nd := range nds {
-		// 当前节点没有快照中的节点
-		if _, ok := r.Prs[nd]; !ok {
-			r.Prs[nd] = &Progress{Match: 0, Next: r.RaftLog.LastIndex() + 1}
-		}
+		r.Prs[nd] = &Progress{Match: 0, Next: r.RaftLog.LastIndex() + 1}
 	}
 
 	r.RaftLog.pendingSnapshot = m.Snapshot
