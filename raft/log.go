@@ -95,6 +95,14 @@ func newLog(storage Storage) *RaftLog {
 // 在内存中无限增长
 func (l *RaftLog) maybeCompact() {
 	// Your Code Here (2C).
+	truncateIndex, _ := l.storage.FirstIndex()
+	if len(l.entries) > 0 {
+		firstIndex := l.entries[0].Index
+		//entries的第一条日志都比storage中小，说明已经被压缩成为快照了
+		if firstIndex < truncateIndex {
+			l.entries = l.entries[truncateIndex-firstIndex:]
+		}
+	}
 }
 
 func (l *RaftLog) Commited() uint64 {
