@@ -16,7 +16,6 @@ package raft
 
 import (
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
-	log "github.com/sirupsen/logrus"
 )
 
 // RaftLog manage the log entries, its struct look like:
@@ -91,6 +90,9 @@ func newLog(storage Storage) *RaftLog {
 // We need to compact the log entries in some point of time like
 // storage compact stabled log entries prevent the log entries
 // grow unlimitedly in memory
+// 我们需要在某个时间点压缩日志条目，例如
+// Storage Compact 稳定日志条目阻止日志条目
+// 在内存中无限增长
 func (l *RaftLog) maybeCompact() {
 	// Your Code Here (2C).
 }
@@ -149,12 +151,6 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 		}
 	}
 	return ents
-
-	//if len(l.entries) == 0 {
-	//	return nil
-	//}
-	//
-	//return l.entries
 }
 
 // nextEnts returns all the committed but not applied entries
@@ -180,8 +176,7 @@ func (l *RaftLog) LastIndex() uint64 {
 		return l.entries[len(l.entries)-1].Index
 	}
 
-	lastIndex, _ := l.storage.LastIndex()
-	return lastIndex
+	return l.stabled
 }
 
 // Term return the term of the entry in the given index
@@ -211,7 +206,11 @@ func (l *RaftLog) Term(i uint64) (uint64, error) {
 
 	term, err := l.storage.Term(i)
 	if err != nil {
-		log.Errorf("index:%d len(l.entries):%d ", i, len(l.entries))
+		if err == ErrUnavailable {
+			if !IsEmptySnap(l.pendingSnapshot) {
+				return l.pendingSnapshot.Metadata.Term, nil
+			}
+		}
 		//panic(err)
 	}
 
