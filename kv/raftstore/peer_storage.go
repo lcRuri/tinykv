@@ -24,6 +24,7 @@ import (
 
 type ApplySnapResult struct {
 	// PrevRegion is the region before snapshot applied
+	// 之前快照应用的区域
 	PrevRegion *metapb.Region
 	Region     *metapb.Region
 }
@@ -343,6 +344,7 @@ func (ps *PeerStorage) Append(entries []eraftpb.Entry, raftWB *engine_util.Write
 }
 
 // Apply the peer with given snapshot
+// 给peer应用快照
 func (ps *PeerStorage) ApplySnapshot(snapshot *eraftpb.Snapshot, kvWB *engine_util.WriteBatch, raftWB *engine_util.WriteBatch) (*ApplySnapResult, error) {
 	log.Infof("%v begin to apply snapshot", ps.Tag)
 	snapData := new(rspb.RaftSnapshotData)
@@ -354,7 +356,38 @@ func (ps *PeerStorage) ApplySnapshot(snapshot *eraftpb.Snapshot, kvWB *engine_ut
 	// and send RegionTaskApply task to region worker through ps.regionSched, also remember call ps.clearMeta
 	// and ps.clearExtraData to delete stale data
 	// Your Code Here (2C).
-	return nil, nil
+	// 需要做的事情:更新storage state，如 raftState 和 applyState 等，
+	//	并通过 ps.regionSched 将 RegionTaskApply 任务发送给 region worker，同时记得调用 ps.clearMeta
+	//	和 ps.clearExtraData 删除过时数据
+
+	ch := make(chan bool, 1)
+	ps.regionSched <- runner.RegionTaskApply{
+		RegionId: snapData.Region.GetId(),
+		SnapMeta: snapshot.Metadata,
+		StartKey: ps.region.GetStartKey(),
+		EndKey:   ps.region.GetEndKey(),
+		Notifier: ch,
+	}
+
+	ps.raftState.LastIndex = snapshot.Metadata.Index
+	ps.raftState.LastTerm = snapshot.Metadata.Term
+	ps.raftState.HardState.Commit = snapshot.Metadata.Index
+	ps.raftState.HardState.Term = snapshot.Metadata.Term
+	ps.raftState.HardState.Vote = 0
+
+	ps.applyState.AppliedIndex = snapshot.Metadata.Index
+	ps.applyState.TruncatedState.Term = snapshot.Metadata.Term
+	ps.applyState.TruncatedState.Index = snapshot.Metadata.Index
+
+	err := ps.clearMeta(kvWB, raftWB)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ApplySnapResult{
+		PrevRegion: ps.region,
+		Region:     snapData.Region,
+	}, nil
 }
 
 // Save memory states to disk.
@@ -365,6 +398,17 @@ func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, erro
 	// Hint: you may call `Append()` and `ApplySnapshot()` in this function
 	// Your Code Here (2B/2C).
 
+	//快照执行
+	var snapshotResult *ApplySnapResult
+	if !raft.IsEmptySnap(&ready.Snapshot) {
+		kvWB := new(engine_util.WriteBatch)
+		raftWB := new(engine_util.WriteBatch)
+		snapshotResult, _ = ps.ApplySnapshot(&ready.Snapshot, kvWB, raftWB)
+
+		kvWB.WriteToDB(ps.Engines.Raft)
+		raftWB.WriteToDB(ps.Engines.Raft)
+	}
+
 	raftWB := new(engine_util.WriteBatch)
 	//将日志存储到磁盘上
 	err := ps.Append(ready.Entries, raftWB)
@@ -372,16 +416,6 @@ func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, erro
 	if !raft.IsEmptyHardState(ready.HardState) {
 		ps.raftState.HardState = &ready.HardState
 	}
-
-	//l := len(ready.Entries)
-	//if l > 0 {
-	//	localState := &rspb.RaftLocalState{
-	//		LastIndex: ready.Entries[l-1].Index,
-	//		LastTerm:  ready.Entries[l-1].Term,
-	//	}
-	//	//更新ps的raftState
-	//	ps.raftState = localState
-	//}
 
 	if len(ready.Entries) > 0 {
 		LastIndex := ready.Entries[len(ready.Entries)-1].Index
@@ -395,9 +429,8 @@ func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, erro
 	//存储到磁盘上
 	raftWB.SetMeta(raftStateKey, ps.raftState)
 	err = raftWB.WriteToDB(ps.Engines.Raft)
-	var applySnapshot *ApplySnapResult
 
-	return applySnapshot, err
+	return snapshotResult, err
 }
 
 func (ps *PeerStorage) ClearData() {
