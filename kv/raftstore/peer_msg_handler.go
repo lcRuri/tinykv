@@ -46,19 +46,13 @@ func (d *peerMsgHandler) HandleRaftReady() {
 		return
 	}
 	// Your Code Here (2B).
-	//todo
-	//log.Infof("in")
 	if !d.RaftGroup.HasReady() {
-		//log.Infof("!d.RaftGroup.HasReady() ")
 		return
 	}
 
 	ready := d.RaftGroup.Ready()
-	//if d.RaftGroup.Raft.Id() == d.RaftGroup.Raft.Lead {
-	//	log.Infof("id:%d raft:%d,lead:%d", d.RaftGroup.Raft.Id(), d.RaftGroup.Raft.RaftLog.LastIndex(), d.RaftGroup.Raft.Lead)
-	//}
+
 	result, err := d.peerStorage.SaveReadyState(&ready)
-	//log.Infof("ooo,len(ready.CommittedEntries):%d,raft committed:%d", len(ready.CommittedEntries), d.RaftGroup.Raft.RaftLog.Commited())
 	if err != nil {
 		return
 	}
@@ -170,50 +164,53 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 		return
 	}
 
-	//if len(msg.Requests) != 0 {
-	//	for len(msg.Requests) > 0 {
-	//log.Infof("handle proposeRaftCommand")
-	//if len(msg.Requests) != 0 {
-	//	for len(msg.Requests) > 0 {
-	req := msg.Requests[0]
-	var key []byte
-	//根据msg类型不同进行处理
-	//log.Infof("req.CmdType:%v", req.CmdType)
-	switch req.CmdType {
-	case raft_cmdpb.CmdType_Get:
-		key = req.Get.Key
-	case raft_cmdpb.CmdType_Put:
-		key = req.Put.Key
-	case raft_cmdpb.CmdType_Delete:
-		key = req.Delete.Key
-	case raft_cmdpb.CmdType_Snap:
+	if msg.AdminRequest != nil {
+		req := msg.AdminRequest
+		switch req.CmdType {
+		case raft_cmdpb.AdminCmdType_CompactLog:
+			data, err := msg.Marshal()
+			if err != nil {
+				panic(err)
+			}
+			_ = d.RaftGroup.Propose(data)
+		}
 	}
-	err = util.CheckKeyInRegion(key, d.Region())
-	if err != nil && req.CmdType != raft_cmdpb.CmdType_Snap {
-		cb.Done(ErrResp(err))
-		//msg.Requests = msg.Requests[1:]
-		return
-	}
-	data, err1 := msg.Marshal()
-	if err1 != nil && data != nil {
-		panic(err)
-	}
-	p := &proposal{index: d.nextProposalIndex(), term: d.Term(), cb: cb}
 
-	//log.Infof("Propose No.", d.nextProposalIndex(), "proposal")
-	d.proposals = append(d.proposals, p)
-	err = d.RaftGroup.Propose(data)
-	if err != nil {
-		panic(err)
+	if len(msg.Requests) > 0 {
+		req := msg.Requests[0]
+		var key []byte
+		//根据msg类型不同进行处理
+		//log.Infof("req.CmdType:%v", req.CmdType)
+		switch req.CmdType {
+		case raft_cmdpb.CmdType_Get:
+			key = req.Get.Key
+		case raft_cmdpb.CmdType_Put:
+			key = req.Put.Key
+		case raft_cmdpb.CmdType_Delete:
+			key = req.Delete.Key
+		case raft_cmdpb.CmdType_Snap:
+		}
+		err = util.CheckKeyInRegion(key, d.Region())
+		if err != nil && req.CmdType != raft_cmdpb.CmdType_Snap {
+			cb.Done(ErrResp(err))
+			//msg.Requests = msg.Requests[1:]
+			return
+		}
+		data, err1 := msg.Marshal()
+		if err1 != nil && data != nil {
+			panic(err)
+		}
+		p := &proposal{index: d.nextProposalIndex(), term: d.Term(), cb: cb}
+
+		//log.Infof("Propose No.", d.nextProposalIndex(), "proposal")
+		d.proposals = append(d.proposals, p)
+		err = d.RaftGroup.Propose(data)
+		if err != nil {
+			panic(err)
+		}
 	}
-	//msg.Requests = msg.Requests[1:]
+
 }
-
-//} else {
-//	log.Infof("msg:%v", msg)
-//}
-
-//}
 
 func (d *peerMsgHandler) onTick() {
 	if d.stopped {
@@ -533,6 +530,7 @@ func (d *peerMsgHandler) onRaftGCLogTick() {
 	// Create a compact log request and notify directly.
 	regionID := d.regionId
 	request := newCompactLogRequest(regionID, d.Meta, compactIdx, term)
+	//log.Infof("newCompactLogRequest")
 	d.proposeRaftCommand(request, nil)
 }
 
