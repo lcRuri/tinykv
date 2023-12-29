@@ -229,6 +229,34 @@ func newRaft(c *Config) *Raft {
 	return raft
 }
 
+func (r *Raft) sendSnapshot(to uint64) {
+	var snap pb.Snapshot
+	var err error
+	if !IsEmptySnap(r.RaftLog.pendingSnapshot) {
+		snap = *r.RaftLog.pendingSnapshot
+	} else {
+		snap, err = r.RaftLog.storage.Snapshot()
+		if err != nil {
+			if err != ErrSnapshotTemporarilyUnavailable {
+				panic(err)
+			}
+		}
+	}
+
+	msg := pb.Message{
+		MsgType:  pb.MessageType_MsgSnapshot,
+		From:     r.id,
+		To:       to,
+		Term:     r.Term,
+		Snapshot: &snap,
+	}
+
+	r.msgs = append(r.msgs, msg)
+	r.Prs[to].Next = snap.Metadata.Index + 1
+	return
+
+}
+
 // sendAppend sends an append RPC with new entries (if any) and the
 // current commit index to the given peer. Returns true if a message was sent.
 // sendAppend发送一个携带新的日志的RPC和目前已经提交的日志索引给发送的peer，返回为真如果消息发送了
@@ -238,16 +266,11 @@ func (r *Raft) sendAppend(to uint64) bool {
 		return false
 	}
 
-	if r.RaftLog.pendingSnapshot != nil {
-		if r.RaftLog.pendingSnapshot.Metadata.Index > r.Prs[to].Next {
-			r.msgs = append(r.msgs, pb.Message{
-				MsgType: pb.MessageType_MsgSnapshot,
-				To:      to,
-				From:    r.id,
-			})
-
-			return true
-		}
+	firstIndex := r.RaftLog.FirstIndex()
+	//log.Infof("to:%d prevIndex:%d firstIndex:%d", to, r.Prs[to].Next-1, firstIndex)
+	if r.Prs[to].Next-1 < firstIndex-1 {
+		r.sendSnapshot(to)
+		return true
 	}
 
 	entries := make([]*pb.Entry, 0)
@@ -506,7 +529,6 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 
 		//收到响应
-
 		if m.MsgType == pb.MessageType_MsgRequestVoteResponse {
 			//log.Infof("raft:%d receive resp from %d reject:%v", r.id, m.From, m.Reject)
 			if r.State != StateCandidate {
@@ -543,6 +565,10 @@ func (r *Raft) Step(m pb.Message) error {
 
 		if m.MsgType == pb.MessageType_MsgHeartbeat {
 			r.handleHeartbeat(m)
+		}
+
+		if m.MsgType == pb.MessageType_MsgSnapshot {
+			r.handleSnapshot(m)
 		}
 	case StateLeader:
 		if m.MsgType == pb.MessageType_MsgBeat {
@@ -604,12 +630,17 @@ func (r *Raft) Step(m pb.Message) error {
 			r.handleAppendEntriesResponse(m)
 		}
 
+		if m.MsgType == pb.MessageType_MsgSnapshot {
+			r.handleSnapshot(m)
+		}
+
 	}
 
 	return nil
 }
 
 func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
+
 	if m.Term > r.Term {
 		r.State = StateFollower
 		r.Term = m.Term
