@@ -360,6 +360,14 @@ func (ps *PeerStorage) ApplySnapshot(snapshot *eraftpb.Snapshot, kvWB *engine_ut
 	//	并通过 ps.regionSched 将 RegionTaskApply 任务发送给 region worker，同时记得调用 ps.clearMeta
 	//	和 ps.clearExtraData 删除过时数据
 
+	if ps.isInitialized() {
+		err := ps.clearMeta(kvWB, raftWB)
+		if err != nil {
+			return nil, err
+		}
+		ps.clearExtraData(snapData.Region)
+	}
+
 	ch := make(chan bool, 1)
 	ps.regionSched <- runner.RegionTaskApply{
 		RegionId: snapData.Region.GetId(),
@@ -378,10 +386,16 @@ func (ps *PeerStorage) ApplySnapshot(snapshot *eraftpb.Snapshot, kvWB *engine_ut
 	ps.applyState.AppliedIndex = snapshot.Metadata.Index
 	ps.applyState.TruncatedState.Term = snapshot.Metadata.Term
 	ps.applyState.TruncatedState.Index = snapshot.Metadata.Index
+	ps.snapState.StateType = snap.SnapState_Applying
 
-	err := ps.clearMeta(kvWB, raftWB)
+	meta.WriteRegionState(kvWB, snapData.Region, rspb.PeerState_Normal)
+	err := kvWB.SetMeta(meta.ApplyStateKey(snapData.Region.GetId()), ps.applyState)
 	if err != nil {
-		return nil, err
+		panic(err)
+	}
+	err = raftWB.SetMeta(meta.RaftStateKey(snapData.Region.GetId()), ps.raftState)
+	if err != nil {
+		panic(err)
 	}
 
 	return &ApplySnapResult{
