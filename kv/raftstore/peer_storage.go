@@ -367,16 +367,6 @@ func (ps *PeerStorage) ApplySnapshot(snapshot *eraftpb.Snapshot, kvWB *engine_ut
 		}
 		ps.clearExtraData(snapData.Region)
 	}
-
-	ch := make(chan bool, 1)
-	ps.regionSched <- runner.RegionTaskApply{
-		RegionId: snapData.Region.GetId(),
-		SnapMeta: snapshot.Metadata,
-		StartKey: ps.region.GetStartKey(),
-		EndKey:   ps.region.GetEndKey(),
-		Notifier: ch,
-	}
-
 	ps.raftState.LastIndex = snapshot.Metadata.Index
 	ps.raftState.LastTerm = snapshot.Metadata.Term
 	ps.raftState.HardState.Commit = snapshot.Metadata.Index
@@ -396,6 +386,20 @@ func (ps *PeerStorage) ApplySnapshot(snapshot *eraftpb.Snapshot, kvWB *engine_ut
 	err = raftWB.SetMeta(meta.RaftStateKey(snapData.Region.GetId()), ps.raftState)
 	if err != nil {
 		panic(err)
+	}
+	ch := make(chan bool, 1)
+	ps.regionSched <- &runner.RegionTaskApply{
+		RegionId: snapData.Region.GetId(),
+		SnapMeta: snapshot.Metadata,
+		StartKey: ps.region.GetStartKey(),
+		EndKey:   ps.region.GetEndKey(),
+		Notifier: ch,
+	}
+
+	success := <-ch
+	log.Infof("success:%v", success)
+	if !success {
+		return nil, nil
 	}
 
 	return &ApplySnapResult{
@@ -418,7 +422,6 @@ func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, erro
 		kvWB := new(engine_util.WriteBatch)
 		raftWB := new(engine_util.WriteBatch)
 		snapshotResult, _ = ps.ApplySnapshot(&ready.Snapshot, kvWB, raftWB)
-
 		kvWB.WriteToDB(ps.Engines.Raft)
 		raftWB.WriteToDB(ps.Engines.Raft)
 	}

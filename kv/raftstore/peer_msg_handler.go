@@ -654,6 +654,21 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 	if err != nil {
 		panic(err)
 	}
+	if len(msg.Requests) == 0 {
+		if msg.AdminRequest != nil {
+			req := msg.AdminRequest
+			switch req.CmdType {
+			case raft_cmdpb.AdminCmdType_CompactLog:
+				compactLog := req.GetCompactLog()
+				if compactLog.CompactIndex >= d.peerStorage.applyState.TruncatedState.Index {
+					d.peerStorage.applyState.TruncatedState.Index = compactLog.CompactIndex
+					d.peerStorage.applyState.TruncatedState.Term = compactLog.CompactTerm
+					kvWB.SetMeta(meta.ApplyStateKey(d.regionId), d.peerStorage.applyState)
+					d.ScheduleCompactLog(compactLog.CompactIndex)
+				}
+			}
+		}
+	}
 	if len(msg.Requests) > 0 {
 		//log.Infof("Requests:%v", msg.Requests[0])
 		req := msg.Requests[0]
@@ -721,8 +736,6 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 				//log.Infof("p.index:%d entry.index:%d", p.index, entry.Index)
 			}
 		}
-	} else {
-		//log.Infof("nil %d", d.RaftGroup.Raft.Id())
 	}
 }
 
