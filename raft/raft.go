@@ -902,6 +902,7 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 	r.RaftLog.stabled = m.Snapshot.Metadata.Index
 	r.Term = m.Term
 
+	//发送过来的快照可能只有当前entries的一部分，将已经存储为快照的一部分截掉
 	if len(r.RaftLog.entries) > 0 {
 		if meta.Index > r.RaftLog.LastIndex() {
 			r.RaftLog.entries = nil
@@ -910,19 +911,11 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 		}
 	}
 
-	if len(r.RaftLog.entries) == 0 {
-		r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{
-			EntryType: pb.EntryType_EntryNormal,
-			Term:      meta.Term,
-			Index:     meta.Index,
-		})
-	}
+	nds := m.Snapshot.Metadata.ConfState.Nodes
+
 	r.Prs = make(map[uint64]*Progress)
-	for _, peer := range meta.ConfState.Nodes {
-		r.Prs[peer] = &Progress{
-			Match: 0,
-			Next:  meta.Index + 1,
-		}
+	for _, nd := range nds {
+		r.Prs[nd] = &Progress{Match: 0, Next: r.RaftLog.LastIndex() + 1}
 	}
 
 	r.RaftLog.pendingSnapshot = m.Snapshot
