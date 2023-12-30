@@ -265,7 +265,7 @@ func (r *Raft) sendAppend(to uint64) bool {
 	}
 
 	firstIndex := r.RaftLog.FirstIndex()
-	log.Infof("to:%d prevIndex:%d firstIndex:%d", to, r.Prs[to].Next-1, firstIndex)
+	//log.Infof("to:%d prevIndex:%d firstIndex:%d", to, r.Prs[to].Next-1, firstIndex)
 	if r.Prs[to].Next-1 < firstIndex-1 {
 		r.sendSnapshot(to)
 		return true
@@ -890,23 +890,39 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 // handleSnapshot handle Snapshot RPC request
 func (r *Raft) handleSnapshot(m pb.Message) {
 	// Your Code Here (2C).
+	meta := m.Snapshot.Metadata
+
+	if meta.Index <= r.RaftLog.committed || m.Term < r.Term {
+		return
+	}
+
 	r.Lead = m.From
-
 	r.RaftLog.applied = m.Snapshot.Metadata.Index
-	if r.RaftLog.committed < m.Snapshot.Metadata.Index {
-		r.RaftLog.committed = m.Snapshot.Metadata.Index
-		r.RaftLog.stabled = m.Snapshot.Metadata.Index
+	r.RaftLog.committed = m.Snapshot.Metadata.Index
+	r.RaftLog.stabled = m.Snapshot.Metadata.Index
+	r.Term = m.Term
+
+	if len(r.RaftLog.entries) > 0 {
+		if meta.Index > r.RaftLog.LastIndex() {
+			r.RaftLog.entries = nil
+		} else if meta.Index >= r.RaftLog.FirstIndex() {
+			r.RaftLog.entries = r.RaftLog.entries[meta.Index-r.RaftLog.FirstIndex():]
+		}
 	}
 
-	if r.Term < m.Snapshot.Metadata.Term {
-		r.Term = m.Term
+	if len(r.RaftLog.entries) == 0 {
+		r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{
+			EntryType: pb.EntryType_EntryNormal,
+			Term:      meta.Term,
+			Index:     meta.Index,
+		})
 	}
-
-	nds := m.Snapshot.Metadata.ConfState.Nodes
-
 	r.Prs = make(map[uint64]*Progress)
-	for _, nd := range nds {
-		r.Prs[nd] = &Progress{Match: 0, Next: r.RaftLog.LastIndex() + 1}
+	for _, peer := range meta.ConfState.Nodes {
+		r.Prs[peer] = &Progress{
+			Match: 0,
+			Next:  meta.Index + 1,
+		}
 	}
 
 	r.RaftLog.pendingSnapshot = m.Snapshot
