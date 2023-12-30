@@ -225,6 +225,7 @@ func (rn *RawNode) Advance(rd Ready) {
 	}
 
 	//println("\n", rn.Raft.id, "stabled:", rn.Raft.RaftLog.stabled, "applied:", rn.Raft.RaftLog.applied)
+
 	rn.Raft.RaftLog.maybeCompact()
 }
 

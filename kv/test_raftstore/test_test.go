@@ -478,7 +478,9 @@ func TestOneSnapshot2C(t *testing.T) {
 	)
 
 	// write some data to trigger snapshot
+	// 写入15条数据
 	for i := 100; i < 115; i++ {
+		//log.Infof("i:%d", i)
 		cluster.MustPutCF(cf, []byte(fmt.Sprintf("k%d", i)), []byte(fmt.Sprintf("v%d", i)))
 	}
 	cluster.MustDeleteCF(cf, []byte("k2"))

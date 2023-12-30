@@ -1075,6 +1075,7 @@ func TestRestoreIgnoreSnapshot2C(t *testing.T) {
 
 func TestProvideSnap2C(t *testing.T) {
 	// restore the state machine from a snapshot so it has a compacted log and a snapshot
+	// 从快照还原状态机，使其具有压缩的日志和快照
 	s := pb.Snapshot{
 		Metadata: &pb.SnapshotMetadata{
 			Index:     11, // magic number
@@ -1156,6 +1157,7 @@ func TestSlowNodeRestore2C(t *testing.T) {
 	nt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
 
 	nt.isolate(3)
+
 	for j := 0; j <= 100; j++ {
 		nt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{}}})
 	}

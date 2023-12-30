@@ -20,8 +20,11 @@ import (
 
 // There're some tasks for region worker, such as:
 // `RegionTaskGen` which will cause the worker to generate a snapshot according to RegionId,
+// 'RegionTaskGen'，这将导致工作线程根据 RegionId 生成快照，
 // `RegionTaskApply` which will apply a snapshot to the region that id equals RegionId,
+// 'RegionTaskApply'，它将快照应用于 id 等于 RegionId 的区域，
 // `RegionTaskDestroy` which will clean up the key range from StartKey to EndKey.
+// 'RegionTaskDestroy'，它将清理从 StartKey 到 EndKey 的键范围。
 
 type RegionTaskGen struct {
 	RegionId uint64                   // specify the region which the task is for.
