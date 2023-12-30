@@ -236,13 +236,11 @@ func (r *Raft) sendSnapshot(to uint64) {
 		snap = *r.RaftLog.pendingSnapshot
 	} else {
 		snap, err = r.RaftLog.storage.Snapshot()
-		if err != nil {
-			if err != ErrSnapshotTemporarilyUnavailable {
-				panic(err)
-			}
-		}
-	}
 
+	}
+	if err != nil {
+		return
+	}
 	msg := pb.Message{
 		MsgType:  pb.MessageType_MsgSnapshot,
 		From:     r.id,
@@ -267,7 +265,7 @@ func (r *Raft) sendAppend(to uint64) bool {
 	}
 
 	firstIndex := r.RaftLog.FirstIndex()
-	//log.Infof("to:%d prevIndex:%d firstIndex:%d", to, r.Prs[to].Next-1, firstIndex)
+	log.Infof("to:%d prevIndex:%d firstIndex:%d", to, r.Prs[to].Next-1, firstIndex)
 	if r.Prs[to].Next-1 < firstIndex-1 {
 		r.sendSnapshot(to)
 		return true
@@ -708,7 +706,6 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 
 	term, err := r.RaftLog.Term(m.Index)
 	if err != nil {
-		panic(err)
 		msg.Reject = true
 		r.msgs = append(r.msgs, msg)
 		return
