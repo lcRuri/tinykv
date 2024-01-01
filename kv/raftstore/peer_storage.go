@@ -154,18 +154,25 @@ func (ps *PeerStorage) FirstIndex() (uint64, error) {
 
 func (ps *PeerStorage) Snapshot() (eraftpb.Snapshot, error) {
 	var snapshot eraftpb.Snapshot
+
+	//当StateType为SnapState_Generating时，尝试去取的Receiver中的结果
 	if ps.snapState.StateType == snap.SnapState_Generating {
 		select {
+		//取到快照结果
 		case s := <-ps.snapState.Receiver:
 			if s != nil {
 				snapshot = *s
 			}
 		default:
+			//没有取到结果
 			return snapshot, raft.ErrSnapshotTemporarilyUnavailable
 		}
+
+		//更改StateType和尝试快照的次数
 		ps.snapState.StateType = snap.SnapState_Relax
 		if snapshot.GetMetadata() != nil {
 			ps.snapTriedCnt = 0
+			//校验快照
 			if ps.validateSnap(&snapshot) {
 				return snapshot, nil
 			}
@@ -174,12 +181,14 @@ func (ps *PeerStorage) Snapshot() (eraftpb.Snapshot, error) {
 		}
 	}
 
+	//尝试超过五次还没有取到快照，报错
 	if ps.snapTriedCnt >= 5 {
 		err := errors.Errorf("failed to get snapshot after %d times", ps.snapTriedCnt)
 		ps.snapTriedCnt = 0
 		return snapshot, err
 	}
 
+	//请求快照
 	log.Infof("%s requesting snapshot", ps.Tag)
 	ps.snapTriedCnt++
 	ch := make(chan *eraftpb.Snapshot, 1)
@@ -188,6 +197,7 @@ func (ps *PeerStorage) Snapshot() (eraftpb.Snapshot, error) {
 		Receiver:  ch,
 	}
 	// schedule snapshot generate task
+	// 将生成快照的任务发送到chan中，ps.regionSched是一个worker.Task的chan
 	ps.regionSched <- &runner.RegionTaskGen{
 		RegionId: ps.region.GetId(),
 		Notifier: ch,

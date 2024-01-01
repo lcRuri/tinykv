@@ -28,10 +28,11 @@ type RaftStorage struct {
 	engines *engine_util.Engines //badger存储
 	config  *config.Config
 
-	node          *raftstore.Node
-	snapManager   *snap.SnapManager          //快照管理
-	raftRouter    *raftstore.RaftstoreRouter //发送和存储消息
-	raftSystem    *raftstore.Raftstore
+	node        *raftstore.Node
+	snapManager *snap.SnapManager          //快照管理
+	raftRouter  *raftstore.RaftstoreRouter //发送和存储消息
+	raftSystem  *raftstore.Raftstore
+
 	resolveWorker *worker.Worker
 	snapWorker    *worker.Worker
 
@@ -196,13 +197,13 @@ func (rs *RaftStorage) Start() error {
 	if err != nil {
 		return err
 	}
+
 	rs.raftRouter, rs.raftSystem = raftstore.CreateRaftstore(cfg)
 
 	rs.resolveWorker = worker.NewWorker("resolver", &rs.wg)
 	resolveSender := rs.resolveWorker.Sender()
 	resolveRunner := newResolverRunner(schedulerClient)
 	rs.resolveWorker.Start(resolveRunner)
-
 	rs.snapManager = snap.NewSnapManager(filepath.Join(cfg.DBPath, "snap"))
 	rs.snapWorker = worker.NewWorker("snap-worker", &rs.wg)
 	snapSender := rs.snapWorker.Sender()

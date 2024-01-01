@@ -235,6 +235,7 @@ func (r *Raft) sendSnapshot(to uint64) {
 	if !IsEmptySnap(r.RaftLog.pendingSnapshot) {
 		snap = *r.RaftLog.pendingSnapshot
 	} else {
+		//log.Infof("1")
 		snap, err = r.RaftLog.storage.Snapshot()
 
 	}
