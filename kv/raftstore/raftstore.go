@@ -225,6 +225,7 @@ func (bs *Raftstore) start(
 		return err
 	}
 	wg := new(sync.WaitGroup)
+	//新建进行处理的worker
 	bs.workers = &workers{
 		splitCheckWorker: worker.NewWorker("split-check", wg),
 		regionWorker:     worker.NewWorker("snapshot-worker", wg),
@@ -232,31 +233,36 @@ func (bs *Raftstore) start(
 		schedulerWorker:  worker.NewWorker("scheduler-worker", wg),
 		wg:               wg,
 	}
+
+	//创建 bs.ctx
 	bs.ctx = &GlobalContext{
-		cfg:                  cfg,
-		engine:               engines,
-		store:                meta,
-		storeMeta:            newStoreMeta(),
-		snapMgr:              snapMgr,
-		router:               bs.router,
-		trans:                trans,
-		schedulerTaskSender:  bs.workers.schedulerWorker.Sender(),
+		cfg:                 cfg,
+		engine:              engines,
+		store:               meta,
+		storeMeta:           newStoreMeta(),
+		snapMgr:             snapMgr,
+		router:              bs.router,
+		trans:               trans,
+		schedulerTaskSender: bs.workers.schedulerWorker.Sender(),
+		// here
 		regionTaskSender:     bs.workers.regionWorker.Sender(),
 		splitCheckTaskSender: bs.workers.splitCheckWorker.Sender(),
 		raftLogGCTaskSender:  bs.workers.raftLogGCWorker.Sender(),
 		schedulerClient:      schedulerClient,
 		tickDriverSender:     bs.tickDriver.newRegionCh,
 	}
-	//创建流程
+
+	//创建对raft的rawnode具体进行操作的peers
 	regionPeers, err := bs.loadPeers()
 	if err != nil {
 		return err
 	}
 
+	//将peers注册到router中
 	for _, peer := range regionPeers {
 		bs.router.register(peer)
 	}
-	//开始lab2b(step4) worker处理
+	//启动peer对应的workers
 	bs.startWorkers(regionPeers)
 	return nil
 }

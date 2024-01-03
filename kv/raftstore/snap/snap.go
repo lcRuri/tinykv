@@ -108,11 +108,11 @@ func NewApplyOptions(db *badger.DB, region *metapb.Region) *ApplyOptions {
 
 // `Snapshot` is an interface for snapshot.
 // It's used in these scenarios:
-//   1. build local snapshot
-//   2. read local snapshot and then replicate it to remote raftstores
-//   3. receive snapshot from remote raftstore and write it to local storage
-//   4. apply snapshot
-//   5. snapshot gc
+//  1. build local snapshot
+//  2. read local snapshot and then replicate it to remote raftstores
+//  3. receive snapshot from remote raftstore and write it to local storage
+//  4. apply snapshot
+//  5. snapshot gc
 type Snapshot interface {
 	io.Reader
 	io.Writer
@@ -129,6 +129,9 @@ type Snapshot interface {
 // `SnapshotDeleter` is a trait for deleting snapshot.
 // It's used to ensure that the snapshot deletion happens under the protection of locking
 // to avoid race case for concurrent read/write.
+// “SnapshotDeleter”是用于删除快照的特征。
+// 它用于确保快照删除在锁定的保护下发生
+// 以避免并发读/写的竞争情况。
 type SnapshotDeleter interface {
 	// DeleteSnapshot returns true if it successfully delete the specified snapshot.
 	DeleteSnapshot(key SnapKey, snapshot Snapshot, checkEntry bool) bool
