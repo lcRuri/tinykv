@@ -451,13 +451,6 @@ func (r *Raft) becomeLeader() {
 	r.Prs[r.id].Next = r.RaftLog.LastIndex() + 1
 
 	r.bcastAppend()
-	//log.Infof("lastIndex:%d", r.RaftLog.LastIndex())
-
-	//log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
-	//log.Info("raft log stabled:", r.RaftLog.stabled, "raft log commited:", r.RaftLog.committed, "raft log len entries", len(r.RaftLog.entries), "lastIndex", r.RaftLog.LastIndex())
-	//for i := 0; i < len(r.peers); i++ {
-	//	log.Info("id:", r.peers[i], "match:", r.Prs[r.peers[i]].Match, "next:", r.Prs[r.peers[i]].Next)
-	//}
 }
 
 func (r *Raft) bcastAppend() {
@@ -510,6 +503,25 @@ func (r *Raft) Step(m pb.Message) error {
 		if m.MsgType == pb.MessageType_MsgSnapshot {
 			r.handleSnapshot(m)
 		}
+
+		if m.MsgType == pb.MessageType_MsgTransferLeader {
+			if r.Lead != None {
+				m.To = r.Lead
+				r.msgs = append(r.msgs, m)
+			}
+		}
+
+		if m.MsgType == pb.MessageType_MsgTimeoutNow {
+			r.becomeCandidate()
+			for _, peer := range r.peers {
+				if peer == r.id {
+					continue
+				} else {
+					r.sendHeartbeat(peer)
+				}
+			}
+		}
+
 	case StateCandidate:
 		//发起投票
 		if m.MsgType == pb.MessageType_MsgHup {
@@ -596,33 +608,7 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 
 		if m.MsgType == pb.MessageType_MsgPropose {
-			//fmt.Println("propose", "len m.entries", len(m.Entries))
-			//log.Infof("raft:%d propose len m.entries:%d", r.id, len(m.Entries))
-			//将msg保存到leader本地
-			for _, e := range m.Entries {
-				entry := pb.Entry{
-					Term:  r.Term,
-					Index: r.RaftLog.LastIndex() + 1,
-					Data:  e.Data,
-				}
-
-				r.RaftLog.entries = append(r.RaftLog.entries, entry)
-				r.Prs[r.id].Match = r.RaftLog.LastIndex()
-				r.Prs[r.id].Next = r.RaftLog.LastIndex() + 1
-				if len(r.peers) == 1 {
-					//fmt.Println("aaa")
-					r.RaftLog.committed++
-				}
-			}
-
-			//向其他的节点发送添加日志请求
-			for id := range r.Prs {
-				if id == r.id {
-					continue
-				}
-
-				r.sendAppend(id)
-			}
+			r.handlePropose(m)
 		}
 
 		if m.MsgType == pb.MessageType_MsgAppendResponse {
@@ -631,6 +617,10 @@ func (r *Raft) Step(m pb.Message) error {
 
 		if m.MsgType == pb.MessageType_MsgSnapshot {
 			r.handleSnapshot(m)
+		}
+
+		if m.MsgType == pb.MessageType_MsgTransferLeader {
+			r.handleTransferLeader(m)
 		}
 
 	}
@@ -660,8 +650,8 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 		//找到match的中位数更新commit
 		matchInts := make([]uint64, 0)
 
-		for i := 0; i < len(r.peers); i++ {
-			matchInts = append(matchInts, r.Prs[r.peers[i]].Match)
+		for _, p := range r.Prs {
+			matchInts = append(matchInts, p.Match)
 		}
 
 		sort.Slice(matchInts, func(i, j int) bool {
@@ -778,6 +768,33 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 
 	//fmt.Println("id:", r.id, "raft log commit", r.RaftLog.committed, "raft log stabled", r.RaftLog.stabled, "msg index", msg.Index, "raft log lastIndex", r.RaftLog.LastIndex(), "len entries", len(r.RaftLog.entries))
 
+}
+
+func (r *Raft) handlePropose(m pb.Message) {
+	for _, e := range m.Entries {
+		entry := pb.Entry{
+			Term:      r.Term,
+			Index:     r.RaftLog.LastIndex() + 1,
+			Data:      e.Data,
+			EntryType: e.EntryType,
+		}
+
+		r.RaftLog.entries = append(r.RaftLog.entries, entry)
+		r.Prs[r.id].Match = r.RaftLog.LastIndex()
+		r.Prs[r.id].Next = r.RaftLog.LastIndex() + 1
+		if len(r.peers) == 1 {
+			r.RaftLog.committed++
+		}
+	}
+
+	//向其他的节点发送添加日志请求
+	for id := range r.Prs {
+		if id == r.id {
+			continue
+		}
+
+		r.sendAppend(id)
+	}
 }
 
 // handleHeartbeat handle Heartbeat RPC request
@@ -925,9 +942,52 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 // addNode add a new node to raft group
 func (r *Raft) addNode(id uint64) {
 	// Your Code Here (3A).
+	index := r.RaftLog.LastIndex()
+
+	p := &Progress{
+		Match: 0,
+		Next:  index + 1,
+	}
+
+	r.Prs[id] = p
 }
 
 // removeNode remove a node from raft group
 func (r *Raft) removeNode(id uint64) {
 	// Your Code Here (3A).
+	delete(r.Prs, id)
+
+	// group中节点只有一个或者没有
+	if len(r.Prs) <= 0 {
+		return
+	}
+
+	matchInts := make([]uint64, 0)
+	for _, p := range r.Prs {
+		matchInts = append(matchInts, p.Match)
+	}
+
+	sort.Slice(matchInts, func(i, j int) bool {
+		return matchInts[i] < matchInts[j]
+	})
+
+	if r.maybeCommit(matchInts[(len(matchInts)-1)/2]) {
+		r.bcastAppend()
+	}
+}
+
+func (r *Raft) handleTransferLeader(m pb.Message) {
+	//log.Infof("handleTransferLeader")
+	if _, ok := r.Prs[m.From]; !ok {
+		return
+	}
+	node := r.Prs[m.From]
+	if node.Match < r.RaftLog.LastIndex() {
+		return
+	}
+
+	r.State = StateFollower
+	r.Lead = m.From
+
+	r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgTimeoutNow, From: r.id, To: m.From})
 }
