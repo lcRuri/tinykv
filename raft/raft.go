@@ -512,6 +512,7 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 
 		if m.MsgType == pb.MessageType_MsgTimeoutNow {
+
 			r.becomeCandidate()
 			for _, peer := range r.peers {
 				if peer == r.id {
@@ -542,6 +543,10 @@ func (r *Raft) Step(m pb.Message) error {
 		//收到响应
 		if m.MsgType == pb.MessageType_MsgRequestVoteResponse {
 			//log.Infof("raft:%d receive resp from %d reject:%v", r.id, m.From, m.Reject)
+			if _, ok := r.Prs[m.To]; !ok {
+				return nil
+			}
+
 			if r.State != StateCandidate {
 				return nil
 			}
@@ -629,6 +634,9 @@ func (r *Raft) Step(m pb.Message) error {
 }
 
 func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
+	if _, ok := r.Prs[m.To]; !ok {
+		return
+	}
 
 	if m.Term > r.Term {
 		r.State = StateFollower
