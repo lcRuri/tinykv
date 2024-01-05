@@ -153,6 +153,7 @@ type Raft struct {
 	// Follow the procedure defined in section 3.10 of Raft phd thesis.
 	// (https://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf)
 	// (Used in 3A leader transfer)
+	//leadTransferee为leader传输目标的id，当其值不为零时。
 	leadTransferee uint64
 
 	// Only one conf change may be pending (in the log, but not yet
@@ -431,6 +432,7 @@ func (r *Raft) becomeLeader() {
 	//变更状态
 	r.State = StateLeader
 	r.Lead = r.id
+	r.leadTransferee = None
 	//设置nextInts和matchInts
 	// todo match是entries的下标 next为啥这么设置
 	index := r.RaftLog.LastIndex()
@@ -451,6 +453,8 @@ func (r *Raft) becomeLeader() {
 	r.Prs[r.id].Next = r.RaftLog.LastIndex() + 1
 
 	r.bcastAppend()
+
+	//log.Infof("%d become leader", r.id)
 }
 
 func (r *Raft) bcastAppend() {
@@ -544,6 +548,7 @@ func (r *Raft) Step(m pb.Message) error {
 		if m.MsgType == pb.MessageType_MsgRequestVoteResponse {
 			//log.Infof("raft:%d receive resp from %d reject:%v", r.id, m.From, m.Reject)
 			if _, ok := r.Prs[m.To]; !ok {
+				r.State = StateFollower
 				return nil
 			}
 
@@ -634,10 +639,6 @@ func (r *Raft) Step(m pb.Message) error {
 }
 
 func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
-	if _, ok := r.Prs[m.To]; !ok {
-		return
-	}
-
 	if m.Term > r.Term {
 		r.State = StateFollower
 		r.Term = m.Term
@@ -653,7 +654,10 @@ func (r *Raft) handleAppendEntriesResponse(m pb.Message) {
 
 		r.Prs[m.From].Match = m.Index
 		r.Prs[m.From].Next = m.Index + 1
-		//todo 只能提交自己任期内的日志
+
+		if m.From == r.leadTransferee {
+			r.Step(pb.Message{MsgType: pb.MessageType_MsgTransferLeader, From: m.From})
+		}
 
 		//找到match的中位数更新commit
 		matchInts := make([]uint64, 0)
@@ -839,8 +843,7 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 			// but sender's last index is greater than or equal to follower's.
 			lastIndex := r.RaftLog.LastIndex()
 			lastTerm, _ := r.RaftLog.Term(lastIndex)
-			if m.LogTerm > lastTerm ||
-				(m.LogTerm == lastTerm && m.Index >= lastIndex) {
+			if m.LogTerm > lastTerm || (m.LogTerm == lastTerm && m.Index >= lastIndex) {
 				r.Vote = m.From
 				if r.Term < m.Term {
 					r.Term = m.Term
@@ -989,13 +992,13 @@ func (r *Raft) handleTransferLeader(m pb.Message) {
 	if _, ok := r.Prs[m.From]; !ok {
 		return
 	}
+
+	r.leadTransferee = m.From
 	node := r.Prs[m.From]
 	if node.Match < r.RaftLog.LastIndex() {
+		r.sendAppend(m.From)
 		return
 	}
-
-	r.State = StateFollower
-	r.Lead = m.From
 
 	r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgTimeoutNow, From: r.id, To: m.From})
 }
