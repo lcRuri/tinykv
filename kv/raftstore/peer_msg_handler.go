@@ -51,7 +51,6 @@ func (d *peerMsgHandler) HandleRaftReady() {
 	}
 
 	ready := d.RaftGroup.Ready()
-
 	result, err := d.peerStorage.SaveReadyState(&ready)
 	if err != nil {
 		return
@@ -96,7 +95,6 @@ func (d *peerMsgHandler) HandleMsg(msg message.Msg) {
 	switch msg.Type {
 	case message.MsgTypeRaftMessage:
 		raftMsg := msg.Data.(*rspb.RaftMessage)
-		//fmt.Println("d.onRaftMsg()", raftMsg.Message.MsgType, "from", raftMsg.Message.From, "to", raftMsg.Message.To)
 		if err := d.onRaftMsg(raftMsg); err != nil {
 			log.Errorf("%s handle raft message error %v", d.Tag, err)
 		}
@@ -173,6 +171,18 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 				panic(err)
 			}
 			_ = d.RaftGroup.Propose(data)
+		case raft_cmdpb.AdminCmdType_TransferLeader:
+			id := msg.AdminRequest.TransferLeader.Peer.Id
+			d.RaftGroup.TransferLeader(id)
+			cb.Done(&raft_cmdpb.RaftCmdResponse{
+				AdminResponse: &raft_cmdpb.AdminResponse{
+					CmdType: raft_cmdpb.AdminCmdType_TransferLeader,
+				},
+				Header: &raft_cmdpb.RaftResponseHeader{
+					Error:       nil,
+					Uuid:        nil,
+					CurrentTerm: d.Term(),
+				}})
 		}
 	}
 
@@ -666,6 +676,8 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 					kvWB.SetMeta(meta.ApplyStateKey(d.regionId), d.peerStorage.applyState)
 					d.ScheduleCompactLog(compactLog.CompactIndex)
 				}
+			case raft_cmdpb.AdminCmdType_TransferLeader:
+
 			}
 		}
 	}
@@ -680,6 +692,7 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 			kvWB.DeleteCF(req.Delete.Cf, req.Delete.Key)
 			//log.Infof("delete key:%s", string(req.Delete.Key))
 		case raft_cmdpb.CmdType_Snap:
+
 		}
 
 		if len(d.proposals) > 0 {
@@ -732,8 +745,6 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 					//log.Infof("resp")
 				}
 				d.proposals = d.proposals[1:]
-			} else {
-				//log.Infof("p.index:%d entry.index:%d", p.index, entry.Index)
 			}
 		}
 	}
