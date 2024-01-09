@@ -13,6 +13,7 @@ import (
 	"github.com/pingcap-incubator/tinykv/kv/raftstore/snap"
 	"github.com/pingcap-incubator/tinykv/kv/raftstore/util"
 	"github.com/pingcap-incubator/tinykv/log"
+	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/metapb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/raft_cmdpb"
 	rspb "github.com/pingcap-incubator/tinykv/proto/pkg/raft_serverpb"
@@ -72,7 +73,13 @@ func (d *peerMsgHandler) HandleRaftReady() {
 		//log.Infof("process:%d", d.RaftGroup.Raft.Id())
 		for _, entry := range ready.CommittedEntries {
 			kvWB := new(engine_util.WriteBatch)
-			d.process(&entry, kvWB)
+
+			//当日志已经被提交到raft进行记录之后，对日志实际进行处理
+			if entry.EntryType == pb.EntryType_EntryConfChange {
+				d.processConfChange(&entry, kvWB)
+			} else {
+				d.process(&entry, kvWB)
+			}
 
 			d.peerStorage.applyState.AppliedIndex = entry.Index
 			err := kvWB.SetMeta(meta.ApplyStateKey(d.regionId), d.peerStorage.applyState)
@@ -183,6 +190,20 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 					Uuid:        nil,
 					CurrentTerm: d.Term(),
 				}})
+		case raft_cmdpb.AdminCmdType_ChangePeer:
+			ctx, err := msg.Marshal()
+			if err != nil {
+				return
+			}
+			confChange := pb.ConfChange{
+				ChangeType: req.ChangePeer.ChangeType,
+				NodeId:     req.ChangePeer.Peer.Id,
+				Context:    ctx,
+			}
+			p := &proposal{index: d.nextProposalIndex(), term: d.Term(), cb: cb}
+			d.proposals = append(d.proposals, p)
+
+			d.RaftGroup.ProposeConfChange(confChange)
 		}
 	}
 
@@ -211,9 +232,8 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 			panic(err)
 		}
 		p := &proposal{index: d.nextProposalIndex(), term: d.Term(), cb: cb}
-
-		//log.Infof("Propose No.", d.nextProposalIndex(), "proposal")
 		d.proposals = append(d.proposals, p)
+
 		err = d.RaftGroup.Propose(data)
 		if err != nil {
 			panic(err)
@@ -748,6 +768,51 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 			}
 		}
 	}
+}
+
+func (d *peerMsgHandler) processConfChange(entry *eraftpb.Entry, kvWB *engine_util.WriteBatch) {
+	//在ProposeConfChange函数中pb.ConfChange序列化到entry的data中
+	cc := &eraftpb.ConfChange{}
+	err := cc.Unmarshal(entry.Data)
+	if err != nil {
+		panic(err)
+	}
+	//在proposeRaftCommand函数中将msg序列化到ConfChange的ctx中
+	msg := *&raft_cmdpb.RaftCmdRequest{}
+	err = msg.Unmarshal(cc.Context)
+	if err != nil {
+		panic(err)
+	}
+	//在raft先增加或者移除节点
+	d.RaftGroup.ApplyConfChange(*cc)
+
+	if cc.ChangeType == eraftpb.ConfChangeType_AddNode {
+		//创建新的peer
+		newPeer := &metapb.Peer{
+			Id:      cc.NodeId,
+			StoreId: msg.AdminRequest.ChangePeer.Peer.StoreId,
+		}
+
+		//新的peer需要获取完整的数据 todo
+
+		//添加到region中并且更改RegionEpoch
+		d.Region().Peers = append(d.Region().Peers, newPeer)
+		d.Region().RegionEpoch.ConfVer++
+		d.insertPeerCache(newPeer)
+		meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
+	} else if cc.ChangeType == eraftpb.ConfChangeType_RemoveNode {
+		//删除缓存中的peer并且在region中也删除
+		d.removePeerCache(cc.NodeId)
+		for _, p := range d.Region().Peers {
+			if p.GetId() == cc.NodeId {
+				util.RemovePeer(d.Region(), cc.NodeId)
+				d.Region().RegionEpoch.ConfVer++
+				kvWB.DeleteMeta(meta.ApplyStateKey(d.regionId))
+				break
+			}
+		}
+	}
+
 }
 
 func newAdminRequest(regionID uint64, peer *metapb.Peer) *raft_cmdpb.RaftCmdRequest {

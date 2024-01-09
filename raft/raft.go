@@ -321,8 +321,14 @@ func (r *Raft) sendAppend(to uint64) bool {
 // sendHeartbeat发送一个心跳RPC给发送的peer
 func (r *Raft) sendHeartbeat(to uint64) {
 	// Your Code Here (2A).
+	if _, ok := r.Prs[to]; !ok {
+		return
+	}
 
-	//todo 关于含有日志的候选者要成为leader 关于LogTerm和Index设置
+	//if r.leadTransferee != None {
+	//	r.Step(pb.Message{MsgType: pb.MessageType_MsgTransferLeader, From: r.leadTransferee})
+	//}
+
 	msg := pb.Message{
 		To:     to,
 		From:   r.id,
@@ -421,7 +427,7 @@ func (r *Raft) becomeCandidate() {
 	r.Vote = r.id
 	r.electionElapsed = 0 - rand.Intn(r.electionTimeout)
 
-	//log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
+	log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
 }
 
 // becomeLeader transform this peer's state to leader
@@ -454,7 +460,7 @@ func (r *Raft) becomeLeader() {
 
 	r.bcastAppend()
 
-	//log.Infof("%d become leader", r.id)
+	log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
 }
 
 func (r *Raft) bcastAppend() {
@@ -953,14 +959,18 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 // addNode add a new node to raft group
 func (r *Raft) addNode(id uint64) {
 	// Your Code Here (3A).
-	index := r.RaftLog.LastIndex()
 
-	p := &Progress{
-		Match: 0,
-		Next:  index + 1,
+	if _, ok := r.Prs[id]; !ok {
+		index := r.RaftLog.LastIndex()
+
+		p := &Progress{
+			Match: 0,
+			Next:  index + 1,
+		}
+
+		r.Prs[id] = p
 	}
 
-	r.Prs[id] = p
 }
 
 // removeNode remove a node from raft group

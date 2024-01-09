@@ -71,7 +71,6 @@ func (pr *router) send(regionID uint64, msg message.Msg) error {
 		return errPeerNotFound
 	}
 	//将消息发送到chan中
-	//log.Infof("aui")
 	pr.peerSender <- msg
 
 	return nil

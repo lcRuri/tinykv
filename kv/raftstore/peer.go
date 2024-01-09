@@ -222,6 +222,10 @@ func (p *peer) MaybeDestroy() bool {
 // 1. Set the region to tombstone;
 // 2. Clear data;
 // 3. Notify all pending requests.
+// Destroy 任务包括：
+// 1.将region设置为tombstone;
+// 2.清理数据;
+// 3.通知所有待处理的请求。
 func (p *peer) Destroy(engine *engine_util.Engines, keepData bool) error {
 	start := time.Now()
 	region := p.Region()
