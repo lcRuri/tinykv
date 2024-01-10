@@ -87,16 +87,6 @@ func (d *peerMsgHandler) HandleRaftReady() {
 				panic(err)
 			}
 
-			if d.stopped {
-				WB := new(engine_util.WriteBatch)
-				WB.DeleteMeta(meta.ApplyStateKey(d.regionId))
-				err = WB.WriteToDB(d.peerStorage.Engines.Kv)
-				if err != nil {
-					panic(err)
-				}
-				return
-			}
-
 			err = kvWB.WriteToDB(d.peerStorage.Engines.Kv)
 			if err != nil {
 				panic(err)

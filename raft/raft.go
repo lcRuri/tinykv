@@ -115,8 +115,7 @@ type Raft struct {
 	Term uint64
 	Vote uint64
 
-	peers []uint64
-	resp  int
+	resp int
 
 	// the log
 	RaftLog *RaftLog
@@ -208,7 +207,6 @@ func newRaft(c *Config) *Raft {
 		State:            StateFollower,
 		electionElapsed:  0,
 		heartbeatElapsed: 0,
-		peers:            c.peers,
 		votes:            map[uint64]bool{},
 		Vote:             state.Vote,
 		Term:             state.Term,
@@ -360,7 +358,7 @@ func (r *Raft) sendHeartbeat(to uint64) {
 // 时钟周期使内部逻辑时钟提前一个时钟周期,用的都是逻辑时钟。tick是否要作为协程启动
 // 逻辑时钟
 func (r *Raft) tick() {
-	if len(r.peers) == 1 && r.State == StateFollower {
+	if len(r.Prs) == 1 && r.State == StateFollower {
 		r.becomeCandidate()
 		r.becomeLeader()
 		return
@@ -434,7 +432,9 @@ func (r *Raft) becomeCandidate() {
 func (r *Raft) becomeLeader() {
 	// Your Code Here (2A).
 	// NOTE: Leader should propose a noop entry on its term
-
+	if _, ok := r.Prs[r.id]; !ok {
+		return
+	}
 	//变更状态
 	r.State = StateLeader
 	r.Lead = r.id
@@ -442,7 +442,7 @@ func (r *Raft) becomeLeader() {
 	//设置nextInts和matchInts
 	// todo match是entries的下标 next为啥这么设置
 	index := r.RaftLog.LastIndex()
-	for _, peer := range r.peers {
+	for peer := range r.Prs {
 		p := &Progress{
 			Match: 0,
 			Next:  index + 1,
@@ -452,7 +452,7 @@ func (r *Raft) becomeLeader() {
 
 	//发送一条空的ents消息 截断之前的消息 leader只能处理自己任期的消息
 	r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Term: r.Term, Index: r.RaftLog.LastIndex() + 1})
-	if len(r.peers) == 1 {
+	if len(r.Prs) == 1 {
 		r.RaftLog.committed++
 	}
 	r.Prs[r.id].Match = r.RaftLog.LastIndex()
@@ -478,7 +478,7 @@ func (r *Raft) bcastAppend() {
 // 查看eraftpb.proto来确定什么消息应该被处理
 func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
-	if len(r.peers) == 1 && r.State == StateFollower {
+	if len(r.Prs) == 1 && r.State == StateFollower {
 		r.becomeCandidate()
 		r.becomeLeader()
 		return nil
@@ -489,7 +489,7 @@ func (r *Raft) Step(m pb.Message) error {
 		//本地消息，需要发起一次election
 		if m.MsgType == pb.MessageType_MsgHup {
 			r.becomeCandidate()
-			for _, peer := range r.peers {
+			for peer := range r.Prs {
 				if peer == r.id {
 					continue
 				} else {
@@ -524,7 +524,7 @@ func (r *Raft) Step(m pb.Message) error {
 		if m.MsgType == pb.MessageType_MsgTimeoutNow {
 
 			r.becomeCandidate()
-			for _, peer := range r.peers {
+			for peer := range r.Prs {
 				if peer == r.id {
 					continue
 				} else {
@@ -537,7 +537,7 @@ func (r *Raft) Step(m pb.Message) error {
 		//发起投票
 		if m.MsgType == pb.MessageType_MsgHup {
 			r.becomeCandidate()
-			for _, peer := range r.peers {
+			for peer := range r.Prs {
 				if peer == r.id {
 					continue
 				} else {
@@ -578,9 +578,9 @@ func (r *Raft) Step(m pb.Message) error {
 				}
 			}
 
-			if granted > len(r.peers)/2 {
+			if granted > len(r.Prs)/2 {
 				r.becomeLeader()
-			} else if denials > len(r.peers)/2 {
+			} else if denials > len(r.Prs)/2 {
 				r.becomeFollower(r.Term, m.From)
 			}
 		}
@@ -599,7 +599,7 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 	case StateLeader:
 		if m.MsgType == pb.MessageType_MsgBeat {
-			for _, peer := range r.peers {
+			for peer := range r.Prs {
 				if peer == r.id {
 					continue
 				} else {
@@ -800,7 +800,7 @@ func (r *Raft) handlePropose(m pb.Message) {
 		r.RaftLog.entries = append(r.RaftLog.entries, entry)
 		r.Prs[r.id].Match = r.RaftLog.LastIndex()
 		r.Prs[r.id].Next = r.RaftLog.LastIndex() + 1
-		if len(r.peers) == 1 {
+		if len(r.Prs) == 1 {
 			r.RaftLog.committed++
 		}
 	}
