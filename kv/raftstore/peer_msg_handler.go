@@ -294,8 +294,7 @@ func (d *peerMsgHandler) ScheduleCompactLog(truncatedIndex uint64) {
 }
 
 func (d *peerMsgHandler) onRaftMsg(msg *rspb.RaftMessage) error {
-	log.Debugf("%s handle raft message %s from %d to %d",
-		d.Tag, msg.GetMessage().GetMsgType(), msg.GetFromPeer().GetId(), msg.GetToPeer().GetId())
+	log.Debugf("%s handle raft message %s from %d to %d", d.Tag, msg.GetMessage().GetMsgType(), msg.GetFromPeer().GetId(), msg.GetToPeer().GetId())
 	if !d.validateRaftMessage(msg) {
 		return nil
 	}
@@ -358,6 +357,9 @@ func (d *peerMsgHandler) validateRaftMessage(msg *rspb.RaftMessage) bool {
 // / Checks if the message is sent to the correct peer.
 // /
 // / Returns true means that the message can be dropped silently.
+// / 检查消息是否发送到正确的对等方。
+// // /
+// / 返回 true 表示可以静默删除消息。
 func (d *peerMsgHandler) checkMessage(msg *rspb.RaftMessage) bool {
 	fromEpoch := msg.GetRegionEpoch()
 	isVoteMsg := util.IsVoteMessage(msg.Message)
@@ -381,9 +383,29 @@ func (d *peerMsgHandler) checkMessage(msg *rspb.RaftMessage) bool {
 	//  unlike case e, 2 will be stale forever.
 	// TODO: for case f, if 2 is stale for a long time, 2 will communicate with scheduler and scheduler will
 	// tell 2 is stale, so 2 can remove itself.
+	// 让我们考虑以下三个节点 [1， 2， 3] 且 1 是领导者的情况：
+	//	a. 1 删除 2,2 仍可能向 1 发送 MsgAppendResponse。
+	//	我们应该忽略这个陈旧的消息，让 2 在之后删除自己
+	//	应用 ConfChange 日志。
+	//	b. 2 是隔离的，1 是删除的 2。当 2 重新加入集群时，2 将
+	//	将过时的 MsgRequestVote 发送给 1 和 3，此时我们应该将 2 告诉 gc 本身。
+	//	c. 2 是隔离的，但可以与 3 通信。1 删除 3。
+	//	2 将向 3 发送过时的 MsgRequestVote，3 应忽略此消息。
+	//	d. 2 是隔离的，但可以与 3 通信。1 删除 2，然后添加 4，删除 3。
+	//	2 会向 3 发送过时的 MsgRequestVote，3 会将 2 告诉 gc 本身。
+	//	e. 2 是隔离的。1 添加 4、5、6，删除 3、1。现在假设 4 是领导者。
+	//	2 重新加入群集后，2 可能会向 1 和 3 发送过时的 MsgRequestVote，
+	//	1 和 3 将忽略此消息。稍后 4 将向 2 发送消息，2 将发送消息
+	//	再次重新加入 Raft 组。
+	//  f. 2 是隔离的。1 添加 4、5、6，删除 3、1。现在假设 4 是领导者，而 4 删除了 2。
+	//	与案例 E 不同，2 将永远过时。
+	//	TODO：对于情况 f，如果 2 长时间过时，则 2 将与调度器通信，调度器将
+	//	告诉 2 是过时的，所以 2 可以自行删除。
 	region := d.Region()
+	// 如果消息的Epoch小于当前region的epoch或者在当前region中找不到peer 则消息已过时且不在当前区域中 进行处理
 	if util.IsEpochStale(fromEpoch, region.RegionEpoch) && util.FindPeer(region, fromStoreID) == nil {
 		// The message is stale and not in current region.
+		// 消息已过时且不在当前区域中
 		handleStaleMsg(d.ctx.trans, msg, region.RegionEpoch, isVoteMsg)
 		return true
 	}
@@ -804,13 +826,15 @@ func (d *peerMsgHandler) processConfChange(entry *eraftpb.Entry, kvWB *engine_ut
 			Id:      cc.NodeId,
 			StoreId: msg.AdminRequest.ChangePeer.Peer.StoreId,
 		}
-
+		log.Infof("add:%d", cc.NodeId)
 		//添加到region中并且更改RegionEpoch
 		d.Region().Peers = append(d.Region().Peers, newPeer)
+		d.Region().RegionEpoch.ConfVer++
 		meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
 	} else if cc.ChangeType == eraftpb.ConfChangeType_RemoveNode {
 		//如果是本身删除自身
-		if cc.NodeId == d.regionId {
+		log.Infof("remove:%d", cc.NodeId)
+		if cc.NodeId == d.PeerId() {
 			kvWB.DeleteMeta(meta.ApplyStateKey(d.regionId))
 			d.destroyPeer()
 			return
@@ -819,7 +843,7 @@ func (d *peerMsgHandler) processConfChange(entry *eraftpb.Entry, kvWB *engine_ut
 		//如果不是本身，从自己的region中删除
 		if d.isNodeExist(cc.NodeId) {
 			d.Region().RegionEpoch.ConfVer++
-			util.RemovePeer(d.Region(), cc.NodeId)
+			deleteFromRegion(d.Region(), cc.NodeId)
 			meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
 			d.removePeerCache(cc.NodeId)
 		}
@@ -853,6 +877,15 @@ func (d *peerMsgHandler) processConfChange(entry *eraftpb.Entry, kvWB *engine_ut
 				})
 			}
 			d.proposals = d.proposals[1:]
+		}
+	}
+}
+
+func deleteFromRegion(region *metapb.Region, id uint64) {
+	for i, p := range region.Peers {
+		if p.Id == id {
+			region.Peers = append(region.Peers[:i], region.Peers[i+1:]...)
+			return
 		}
 	}
 }
