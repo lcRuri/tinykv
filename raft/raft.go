@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"github.com/pingcap-incubator/tinykv/kv/raftstore/util"
 	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"math/rand"
@@ -348,6 +349,8 @@ func (r *Raft) sendHeartbeat(to uint64) {
 	}
 	if r.State == StateLeader {
 		msg.MsgType = pb.MessageType_MsgHeartbeat
+		//maybeCreatePeer IsInitialMsg
+		msg.Commit = util.RaftInvalidIndex
 	}
 
 	//发送消息，只需将其推送到 raft.Raft.msgs
@@ -425,7 +428,7 @@ func (r *Raft) becomeCandidate() {
 	r.Vote = r.id
 	r.electionElapsed = 0 - rand.Intn(r.electionTimeout)
 
-	log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
+	//log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
 }
 
 // becomeLeader transform this peer's state to leader
@@ -460,7 +463,7 @@ func (r *Raft) becomeLeader() {
 
 	r.bcastAppend()
 
-	log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
+	//log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
 }
 
 func (r *Raft) bcastAppend() {
