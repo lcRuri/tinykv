@@ -963,8 +963,6 @@ func (r *Raft) addNode(id uint64) {
 	// Your Code Here (3A).
 
 	if _, ok := r.Prs[id]; !ok {
-		//index := r.RaftLog.LastIndex()
-
 		p := &Progress{
 			Match: 0,
 			Next:  1,
