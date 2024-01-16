@@ -428,7 +428,7 @@ func (r *Raft) becomeCandidate() {
 	r.Vote = r.id
 	r.electionElapsed = 0 - rand.Intn(r.electionTimeout)
 
-	//log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
+	log.Infof("raft:%d become candidate at term:%d", r.id, r.Term)
 }
 
 // becomeLeader transform this peer's state to leader
@@ -443,7 +443,6 @@ func (r *Raft) becomeLeader() {
 	r.Lead = r.id
 	r.leadTransferee = None
 	//设置nextInts和matchInts
-	// todo match是entries的下标 next为啥这么设置
 	index := r.RaftLog.LastIndex()
 	for peer := range r.Prs {
 		p := &Progress{
@@ -463,7 +462,7 @@ func (r *Raft) becomeLeader() {
 
 	r.bcastAppend()
 
-	//log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
+	log.Infof("raft:%d become leader at term:%d", r.id, r.Term)
 }
 
 func (r *Raft) bcastAppend() {
@@ -964,11 +963,11 @@ func (r *Raft) addNode(id uint64) {
 	// Your Code Here (3A).
 
 	if _, ok := r.Prs[id]; !ok {
-		index := r.RaftLog.LastIndex()
+		//index := r.RaftLog.LastIndex()
 
 		p := &Progress{
 			Match: 0,
-			Next:  index + 1,
+			Next:  1,
 		}
 
 		r.Prs[id] = p
