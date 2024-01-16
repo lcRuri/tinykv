@@ -87,6 +87,17 @@ func (d *peerMsgHandler) HandleRaftReady() {
 				panic(err)
 			}
 
+			//可能会在processConfChange的时候将本身destroy掉了
+			if d.stopped {
+				kv := new(engine_util.WriteBatch)
+				kv.DeleteMeta(meta.ApplyStateKey(d.regionId))
+				err = kv.WriteToDB(d.peerStorage.Engines.Kv)
+				if err != nil {
+					panic(err)
+				}
+				return
+			}
+
 			err = kvWB.WriteToDB(d.peerStorage.Engines.Kv)
 			if err != nil {
 				panic(err)
@@ -536,6 +547,7 @@ func (d *peerMsgHandler) destroyPeer() {
 	}
 	//删除router中的peer
 	d.ctx.router.close(regionID)
+	//更改peer的状态
 	d.stopped = true
 	if isInitialized && meta.regionRanges.Delete(&regionItem{region: d.Region()}) == nil {
 		panic(d.Tag + " meta corruption detected")
@@ -826,14 +838,14 @@ func (d *peerMsgHandler) processConfChange(entry *eraftpb.Entry, kvWB *engine_ut
 			Id:      cc.NodeId,
 			StoreId: msg.AdminRequest.ChangePeer.Peer.StoreId,
 		}
-		log.Infof("add:%d", cc.NodeId)
+		//log.Infof("add:%d", cc.NodeId)
 		//添加到region中并且更改RegionEpoch
 		d.Region().Peers = append(d.Region().Peers, newPeer)
 		d.Region().RegionEpoch.ConfVer++
 		meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
 	} else if cc.ChangeType == eraftpb.ConfChangeType_RemoveNode {
 		//如果是本身删除自身
-		log.Infof("remove:%d", cc.NodeId)
+		//log.Infof("remove:%d", cc.NodeId)
 		if cc.NodeId == d.PeerId() {
 			kvWB.DeleteMeta(meta.ApplyStateKey(d.regionId))
 			d.destroyPeer()
