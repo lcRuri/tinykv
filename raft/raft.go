@@ -900,19 +900,19 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 
 		r.Lead = m.From
 		r.electionElapsed -= r.heartbeatTimeout
-		if m.Commit > r.RaftLog.committed {
-			msg := pb.Message{
-				MsgType: pb.MessageType_MsgHeartbeatResponse,
-				To:      m.From,
-				From:    r.id,
-				Term:    r.Term,
-				Commit:  r.RaftLog.committed,
-				Index:   r.RaftLog.stabled,
-				Reject:  false,
-			}
-
-			r.msgs = append(r.msgs, msg)
+		//if m.Commit > r.RaftLog.committed {
+		msg := pb.Message{
+			MsgType: pb.MessageType_MsgHeartbeatResponse,
+			To:      m.From,
+			From:    r.id,
+			Term:    r.Term,
+			Commit:  r.RaftLog.committed,
+			Index:   r.RaftLog.stabled,
+			Reject:  false,
 		}
+
+		r.msgs = append(r.msgs, msg)
+		//}
 
 	case pb.MessageType_MsgHeartbeatResponse:
 		if r.State != StateLeader {
