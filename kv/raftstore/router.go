@@ -1,7 +1,6 @@
 package raftstore
 
 import (
-	"github.com/pingcap-incubator/tinykv/log"
 	"sync"
 	"sync/atomic"
 
@@ -67,7 +66,7 @@ func (pr *router) send(regionID uint64, msg message.Msg) error {
 	p := pr.get(regionID)
 	//判断peer是否存在并且未被关闭
 	if p == nil || atomic.LoadUint32(&p.closed) == 1 {
-		log.Infof("errPeerNotFound peer:%d ", regionID)
+		//log.Infof("errPeerNotFound peer:%d ", regionID)
 		return errPeerNotFound
 	}
 	//将消息发送到chan中

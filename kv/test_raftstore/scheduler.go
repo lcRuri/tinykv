@@ -350,6 +350,9 @@ func (m *MockSchedulerClient) handleHeartbeatConfVersion(region *metapb.Region) 
 		// If ConfVer changed, TinyKV has added/removed one peer already.
 		// So scheduler and TinyKV can't have same peer count and can only have
 		// only one different peer.
+		//如果 ConfVer 发生了变化，则 TinyKV 已经添加/删除了一个对等节点。
+		//所以调度器和 TinyKV 不能有相同的对等体数量，只能有
+		//只有一个不同的对等体。
 		if searchRegionPeerLen > regionPeerLen {
 			if searchRegionPeerLen-regionPeerLen != 1 {
 				panic("should only one conf change")

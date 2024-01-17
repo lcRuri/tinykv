@@ -371,6 +371,9 @@ func TestCommitWithoutNewTermEntry2AB(t *testing.T) {
 // TestCommitWithHeartbeat tests leader can send log
 // to follower when it received a heartbeat response
 // which indicate it doesn't have update-to-date log
+// TestCommitWithHeartbeat 测试领导者可以发送日志给follower
+// 在收到心跳响应
+// 表示它没有更新到日期的日志
 func TestCommitWithHeartbeat2AB(t *testing.T) {
 	tt := newNetwork(nil, nil, nil, nil, nil)
 	tt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
@@ -1238,6 +1241,7 @@ func TestCampaignWhileLeader2AA(t *testing.T) {
 
 // TestCommitAfterRemoveNode verifies that pending commands can become
 // committed when a config change reduces the quorum requirements.
+// TestCommitAfterRemoveNode 验证挂起的命令可以变为 当配置更改降低仲裁要求时提交。
 func TestCommitAfterRemoveNode3A(t *testing.T) {
 	// Create a cluster with two nodes.
 	s := NewMemoryStorage()
@@ -1304,6 +1308,7 @@ func TestCommitAfterRemoveNode3A(t *testing.T) {
 
 // TestLeaderTransferToUpToDateNode verifies transferring should succeed
 // if the transferee has the most up-to-date log entries when transfer starts.
+// 验证转移应该成功如果转移者有足够多的日志当转移开始
 func TestLeaderTransferToUpToDateNode3A(t *testing.T) {
 	nt := newNetwork(nil, nil, nil)
 	nt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
@@ -1332,6 +1337,9 @@ func TestLeaderTransferToUpToDateNode3A(t *testing.T) {
 // Not like TestLeaderTransferToUpToDateNode, where the leader transfer message
 // is sent to the leader, in this test case every leader transfer message is sent
 // to the follower.
+// TestLeaderTransferToUpToDateNodeFromFollower验证转移应该成功如果转移者有足够多的日志当转移发送
+// 和TestLeaderTransferToUpToDateNode测试将leader transfer消息发送给leader不同的是，在这个测试的transfer的
+// 消息被发送给follower
 func TestLeaderTransferToUpToDateNodeFromFollower3A(t *testing.T) {
 	nt := newNetwork(nil, nil, nil)
 	nt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
@@ -1368,7 +1376,7 @@ func TestLeaderTransferToSlowFollower3A(t *testing.T) {
 		t.Fatalf("node 1 has match %d for node 3, want %d", lead.Prs[3].Match, 1)
 	}
 
-	// Transfer leadership to 3 when node 3 is lack of log.
+	// .Transfer leadership to 3 when node 3 is lack of log
 	nt.send(pb.Message{From: 3, To: 1, MsgType: pb.MessageType_MsgTransferLeader})
 
 	checkLeaderTransferState(t, lead, StateFollower, 3)
@@ -1448,6 +1456,7 @@ func TestLeaderTransferRemoveNode3A(t *testing.T) {
 }
 
 // TestLeaderTransferBack verifies leadership can transfer back to self when last transfer is pending.
+// TestLeaderTransferBack验证领导力是否可以在最后一次传输等待时转移回self。
 func TestLeaderTransferBack3A(t *testing.T) {
 	nt := newNetwork(nil, nil, nil)
 	nt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})

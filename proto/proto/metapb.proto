@@ -30,8 +30,10 @@ message Store {
 
 message RegionEpoch {
     // Conf change version, auto increment when add or remove peer
+    // 当增加或者移除节点的时候会自增
     uint64 conf_ver = 1;
     // Region version, auto increment when split or merge
+    // 当分割或者合并的时候会自增
     uint64 version = 2;
 }
 
