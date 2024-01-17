@@ -221,7 +221,12 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 			}
 
 			d.proposals = append(d.proposals, p)
-
+		case raft_cmdpb.AdminCmdType_Split:
+			data, err := msg.Marshal()
+			if err != nil {
+				panic(err)
+			}
+			_ = d.RaftGroup.Propose(data)
 		}
 	}
 
@@ -738,8 +743,39 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 					kvWB.SetMeta(meta.ApplyStateKey(d.regionId), d.peerStorage.applyState)
 					d.ScheduleCompactLog(compactLog.CompactIndex)
 				}
-			case raft_cmdpb.AdminCmdType_TransferLeader:
+			case raft_cmdpb.AdminCmdType_Split:
+				newRegionId := req.Split.NewRegionId
+				newPeerIds := req.Split.NewPeerIds
+				splitKey := req.Split.SplitKey
+				//当raft层通过共识以后，这边需要做的是，
+				// 1.拆分本身的区域
 
+				// 2.原来的继承拆分前的元数据，修改Range 和 RegionEpoch
+				d.Region().RegionEpoch.Version++
+				d.Region().EndKey = splitKey
+				d.ctx.storeMeta.regionRanges.ReplaceOrInsert(&regionItem{d.Region()})
+
+				// 3.新建一个peer，创建相关的元信息，注册到router中
+				peers := []*metapb.Peer{}
+				for _, id := range newPeerIds {
+					peers = append(peers, &metapb.Peer{
+						Id:      id,
+						StoreId: d.ctx.store.Id,
+					})
+				}
+				region := &metapb.Region{
+					Id:          newRegionId,
+					StartKey:    splitKey,
+					RegionEpoch: d.Region().RegionEpoch,
+					Peers:       peers,
+				}
+				newPeer, err := createPeer(d.ctx.store.GetId(), d.ctx.cfg, d.ctx.splitCheckTaskSender, d.ctx.engine, region)
+				if err != nil {
+					log.Infof("createPeer err:%s", err.Error())
+					return
+				}
+				//注册
+				d.ctx.router.register(newPeer)
 			}
 		}
 	}
