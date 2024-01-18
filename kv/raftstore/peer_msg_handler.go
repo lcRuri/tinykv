@@ -222,11 +222,24 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 
 			d.proposals = append(d.proposals, p)
 		case raft_cmdpb.AdminCmdType_Split:
+			err = util.CheckKeyInRegion(req.Split.SplitKey, d.Region())
+			if err != nil {
+				cb.Done(ErrResp(err))
+				return
+			}
 			data, err := msg.Marshal()
 			if err != nil {
 				panic(err)
 			}
+
+			p := &proposal{
+				index: d.nextProposalIndex(),
+				term:  d.Term(),
+				cb:    cb,
+			}
 			_ = d.RaftGroup.Propose(data)
+
+			d.proposals = append(d.proposals, p)
 		}
 	}
 
@@ -750,18 +763,12 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 				//当raft层通过共识以后，这边需要做的是，
 				// 1.拆分本身的区域
 
-				// 2.原来的继承拆分前的元数据，修改Range 和 RegionEpoch
-				d.Region().RegionEpoch.Version++
-				d.Region().EndKey = splitKey
-				d.ctx.storeMeta.regionRanges.ReplaceOrInsert(&regionItem{d.Region()})
-				meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
-
 				// 3.新建一个peer，创建相关的元信息，注册到router中
 				peers := []*metapb.Peer{}
-				for _, id := range newPeerIds {
+				for i, p := range d.Region().Peers {
 					peers = append(peers, &metapb.Peer{
-						Id:      id,
-						StoreId: d.ctx.store.Id,
+						Id:      newPeerIds[i],
+						StoreId: p.StoreId,
 					})
 				}
 				region := &metapb.Region{
@@ -774,7 +781,7 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 					},
 					Peers: peers,
 				}
-				newPeer, err := createPeer(d.ctx.store.GetId(), d.ctx.cfg, d.ctx.splitCheckTaskSender, d.ctx.engine, region)
+				newPeer, err := createPeer(d.storeID(), d.ctx.cfg, d.ctx.splitCheckTaskSender, d.ctx.engine, region)
 				if err != nil {
 					log.Infof("createPeer err:%s", err.Error())
 					return
@@ -784,6 +791,12 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 				d.ctx.storeMeta.regionRanges.ReplaceOrInsert(&regionItem{region: region})
 				d.ctx.storeMeta.regions[newRegionId] = region
 				meta.WriteRegionState(kvWB, region, rspb.PeerState_Normal)
+
+				// 2.原来的继承拆分前的元数据，修改Range 和 RegionEpoch
+				d.Region().RegionEpoch.Version++
+				d.Region().EndKey = splitKey
+				d.ctx.storeMeta.regionRanges.ReplaceOrInsert(&regionItem{d.Region()})
+				meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
 
 				//启动
 				d.ctx.router.send(newRegionId, message.Msg{RegionID: newRegionId, Type: message.MsgTypeStart})
