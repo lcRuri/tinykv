@@ -754,6 +754,7 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 				d.Region().RegionEpoch.Version++
 				d.Region().EndKey = splitKey
 				d.ctx.storeMeta.regionRanges.ReplaceOrInsert(&regionItem{d.Region()})
+				meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
 
 				// 3.新建一个peer，创建相关的元信息，注册到router中
 				peers := []*metapb.Peer{}
@@ -764,10 +765,14 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 					})
 				}
 				region := &metapb.Region{
-					Id:          newRegionId,
-					StartKey:    splitKey,
-					RegionEpoch: d.Region().RegionEpoch,
-					Peers:       peers,
+					Id:       newRegionId,
+					StartKey: splitKey,
+					EndKey:   d.Region().EndKey,
+					RegionEpoch: &metapb.RegionEpoch{
+						ConfVer: 1,
+						Version: 1,
+					},
+					Peers: peers,
 				}
 				newPeer, err := createPeer(d.ctx.store.GetId(), d.ctx.cfg, d.ctx.splitCheckTaskSender, d.ctx.engine, region)
 				if err != nil {
@@ -776,6 +781,25 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 				}
 				//注册
 				d.ctx.router.register(newPeer)
+				d.ctx.storeMeta.regionRanges.ReplaceOrInsert(&regionItem{region: region})
+				d.ctx.storeMeta.regions[newRegionId] = region
+				meta.WriteRegionState(kvWB, region, rspb.PeerState_Normal)
+
+				//启动
+				d.ctx.router.send(newRegionId, message.Msg{RegionID: newRegionId, Type: message.MsgTypeStart})
+
+				//callback 将拆分好的两个region返回
+				resp := &raft_cmdpb.RaftCmdResponse{
+					Header: &raft_cmdpb.RaftResponseHeader{},
+					AdminResponse: &raft_cmdpb.AdminResponse{
+						CmdType: raft_cmdpb.AdminCmdType_Split,
+						Split: &raft_cmdpb.SplitResponse{
+							Regions: []*metapb.Region{d.Region(), region},
+						},
+					},
+				}
+
+				d.handleProposal(entry, resp)
 			}
 		}
 	}
@@ -900,6 +924,17 @@ func (d *peerMsgHandler) processConfChange(entry *eraftpb.Entry, kvWB *engine_ut
 	}
 
 	//还有msg要处理
+	resp := &raft_cmdpb.RaftCmdResponse{
+		Header: &raft_cmdpb.RaftResponseHeader{},
+		AdminResponse: &raft_cmdpb.AdminResponse{
+			CmdType:    raft_cmdpb.AdminCmdType_ChangePeer,
+			ChangePeer: &raft_cmdpb.ChangePeerResponse{},
+		}}
+
+	d.handleProposal(entry, resp)
+}
+
+func (d *peerMsgHandler) handleProposal(entry *pb.Entry, resp *raft_cmdpb.RaftCmdResponse) {
 	if len(d.proposals) > 0 {
 		p := d.proposals[0]
 
@@ -917,13 +952,7 @@ func (d *peerMsgHandler) processConfChange(entry *eraftpb.Entry, kvWB *engine_ut
 			if entry.Term != p.term {
 				NotifyStaleReq(entry.Term, p.cb)
 			} else {
-				p.cb.Done(&raft_cmdpb.RaftCmdResponse{
-					Header: &raft_cmdpb.RaftResponseHeader{},
-					AdminResponse: &raft_cmdpb.AdminResponse{
-						CmdType:    raft_cmdpb.AdminCmdType_ChangePeer,
-						ChangePeer: &raft_cmdpb.ChangePeerResponse{},
-					},
-				})
+				p.cb.Done(resp)
 			}
 			d.proposals = d.proposals[1:]
 		}
