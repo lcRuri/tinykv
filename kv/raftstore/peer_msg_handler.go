@@ -76,7 +76,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 			kvWB := new(engine_util.WriteBatch)
 
 			//当日志已经被提交到raft进行记录之后，对日志实际进行处理
-			if entry.EntryType == pb.EntryType_EntryConfChange {
+			if entry.EntryType == eraftpb.EntryType_EntryConfChange {
 				d.processConfChange(&entry, kvWB)
 			} else {
 				d.process(&entry, kvWB)
@@ -658,6 +658,7 @@ func (d *peerMsgHandler) onPrepareSplitRegion(regionEpoch *metapb.RegionEpoch, s
 		Peer:     d.Meta,
 		Callback: cb,
 	}
+	log.Infof("onPrepareSplitRegion")
 }
 
 func (d *peerMsgHandler) validateSplitRegion(epoch *metapb.RegionEpoch, splitKey []byte) error {
@@ -768,16 +769,16 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 					regionNotFound := &util.ErrRegionNotFound{RegionId: d.regionId}
 					resp := ErrResp(regionNotFound)
 					d.handleProposal(entry, resp)
+					log.Infof("Region %d peer %d failed ErrRegionNotFound check", d.regionId, d.PeerId())
 					return
 				}
-				log.Infof("Region %d peer %d pass ErrRegionNotFound check", d.regionId, d.PeerId())
 
 				//判断splitkey是否在当前region
 				if err := util.CheckKeyInRegion(splitKey, d.Region()); err != nil {
 					d.handleProposal(entry, ErrResp(err))
+					log.Infof("Region %d peer %d failed KeyInRegion check err:%s", d.regionId, d.PeerId(), err.Error())
 					return
 				}
-				log.Infof("Region %d peer %d pass KeyInRegion check", d.regionId, d.PeerId())
 
 				if err := util.CheckRegionEpoch(msg, d.Region(), true); err != nil {
 					if errEpochNotMatching, ok := err.(*util.ErrEpochNotMatch); ok {
@@ -786,23 +787,24 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 							errEpochNotMatching.Regions = append(errEpochNotMatching.Regions, siblingRegion)
 						}
 						d.handleProposal(entry, ErrResp(errEpochNotMatching))
+						log.Infof("CheckRegionEpoch failed err:%s", err.Error())
 						return
 					}
 				}
 
 				//当raft层通过共识以后，这边需要做的是，
 				// 1.拆分本身的区域
-				//length := len(d.Region().Peers)
+				length := len(d.Region().Peers)
 				// sort to ensure the order between different peers
-				//for i := 0; i < length; i++ {
-				//	for j := 0; j < length-i-1; j++ {
-				//		if d.Region().Peers[j].Id > d.Region().Peers[j+1].Id {
-				//			temp := d.Region().Peers[j+1]
-				//			d.Region().Peers[j+1] = d.Region().Peers[j]
-				//			d.Region().Peers[j] = temp
-				//		}
-				//	}
-				//}
+				for i := 0; i < length; i++ {
+					for j := 0; j < length-i-1; j++ {
+						if d.Region().Peers[j].Id > d.Region().Peers[j+1].Id {
+							temp := d.Region().Peers[j+1]
+							d.Region().Peers[j+1] = d.Region().Peers[j]
+							d.Region().Peers[j] = temp
+						}
+					}
+				}
 				// 3.新建一个peer，创建相关的元信息，注册到router中
 				peers := []*metapb.Peer{}
 				for i, p := range d.Region().Peers {
@@ -853,6 +855,8 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 				}
 
 				d.handleProposal(entry, resp)
+
+				log.Infof("split done")
 			}
 		}
 	}
