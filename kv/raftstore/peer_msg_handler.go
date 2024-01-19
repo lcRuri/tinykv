@@ -126,6 +126,8 @@ func (d *peerMsgHandler) HandleMsg(msg message.Msg) {
 	case message.MsgTypeSplitRegion:
 		split := msg.Data.(*message.MsgSplitRegion)
 		log.Infof("%s on split with %v", d.Tag, split.SplitKey)
+		log.Infof("%s on old version %d, old config version %d", d.Tag, d.Region().RegionEpoch.Version, d.Region().RegionEpoch.ConfVer)
+		log.Infof("%s on split version %d, config version %d", d.Tag, split.RegionEpoch.Version, split.RegionEpoch.ConfVer)
 		d.onPrepareSplitRegion(split.RegionEpoch, split.SplitKey, split.Callback)
 	case message.MsgTypeRegionApproximateSize:
 		d.onApproximateRegionSize(msg.Data.(uint64))
@@ -760,9 +762,47 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 				newRegionId := req.Split.NewRegionId
 				newPeerIds := req.Split.NewPeerIds
 				splitKey := req.Split.SplitKey
+
+				// 判断msg的region是不是这个region
+				if msg.Header.RegionId != d.regionId {
+					regionNotFound := &util.ErrRegionNotFound{RegionId: d.regionId}
+					resp := ErrResp(regionNotFound)
+					d.handleProposal(entry, resp)
+					return
+				}
+				log.Infof("Region %d peer %d pass ErrRegionNotFound check", d.regionId, d.PeerId())
+
+				//判断splitkey是否在当前region
+				if err := util.CheckKeyInRegion(splitKey, d.Region()); err != nil {
+					d.handleProposal(entry, ErrResp(err))
+					return
+				}
+				log.Infof("Region %d peer %d pass KeyInRegion check", d.regionId, d.PeerId())
+
+				if err := util.CheckRegionEpoch(msg, d.Region(), true); err != nil {
+					if errEpochNotMatching, ok := err.(*util.ErrEpochNotMatch); ok {
+						siblingRegion := d.findSiblingRegion()
+						if siblingRegion != nil {
+							errEpochNotMatching.Regions = append(errEpochNotMatching.Regions, siblingRegion)
+						}
+						d.handleProposal(entry, ErrResp(errEpochNotMatching))
+						return
+					}
+				}
+
 				//当raft层通过共识以后，这边需要做的是，
 				// 1.拆分本身的区域
-
+				//length := len(d.Region().Peers)
+				// sort to ensure the order between different peers
+				//for i := 0; i < length; i++ {
+				//	for j := 0; j < length-i-1; j++ {
+				//		if d.Region().Peers[j].Id > d.Region().Peers[j+1].Id {
+				//			temp := d.Region().Peers[j+1]
+				//			d.Region().Peers[j+1] = d.Region().Peers[j]
+				//			d.Region().Peers[j] = temp
+				//		}
+				//	}
+				//}
 				// 3.新建一个peer，创建相关的元信息，注册到router中
 				peers := []*metapb.Peer{}
 				for i, p := range d.Region().Peers {
