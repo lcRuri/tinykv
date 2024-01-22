@@ -129,8 +129,8 @@ type Raft struct {
 	State StateType
 
 	// votes records
-	votes map[uint64]bool
-
+	votes        map[uint64]bool
+	recentActive map[uint64]bool
 	// msgs need to send
 	msgs []pb.Message
 
@@ -209,6 +209,7 @@ func newRaft(c *Config) *Raft {
 		electionElapsed:  0,
 		heartbeatElapsed: 0,
 		votes:            map[uint64]bool{},
+		recentActive:     map[uint64]bool{},
 		Vote:             state.Vote,
 		Term:             state.Term,
 		Lead:             None,
@@ -392,6 +393,18 @@ func (r *Raft) tick() {
 	//维护heartElapsed
 	case StateLeader:
 
+		r.electionElapsed++
+		num := len(r.recentActive)
+		length := len(r.Prs)
+		if r.electionElapsed >= r.electionTimeout {
+			r.electionElapsed = 0 - rand.Intn(r.electionTimeout)
+			r.recentActive = make(map[uint64]bool)
+			r.recentActive[r.id] = true
+			if num <= length {
+				r.campaign()
+			}
+		}
+
 		r.heartbeatElapsed++
 		//当heartbeatElapsed超过heartbeatTimeout，发送心跳
 		if r.heartbeatElapsed >= r.heartbeatTimeout {
@@ -400,6 +413,43 @@ func (r *Raft) tick() {
 			r.Step(msg)
 		}
 	}
+}
+
+func (r *Raft) campaign() {
+	if _, ok := r.Prs[r.id]; !ok {
+		return
+	}
+	r.becomeCandidate()
+	if len(r.Prs) == 1 {
+		r.becomeLeader()
+	}
+	for peer := range r.Prs {
+		if peer != r.id {
+			r.sendRequestVote(peer)
+		}
+	}
+}
+
+func (r *Raft) sendRequestVote(to uint64) bool {
+	if _, ok := r.Prs[to]; !ok {
+		return false
+	}
+	lastIndex := r.RaftLog.LastIndex()
+	lastLogTerm, _ := r.RaftLog.Term(lastIndex)
+
+	//println("send -- m.From:", r.id, "m.To:", to,"m.Term:", r.Term, "m.Index:", lastIndex, "m.LogTerm:", lastLogTerm)
+	msg := pb.Message{
+		MsgType: pb.MessageType_MsgRequestVote,
+		From:    r.id,
+		To:      to,
+		Term:    r.Term,
+		Commit:  r.RaftLog.committed,
+		LogTerm: lastLogTerm,
+		Index:   lastIndex,
+		Entries: nil,
+	}
+	r.msgs = append(r.msgs, msg)
+	return true
 }
 
 // becomeFollower transform this peer's state to Follower
@@ -442,6 +492,8 @@ func (r *Raft) becomeLeader() {
 	r.State = StateLeader
 	r.Lead = r.id
 	r.leadTransferee = None
+	r.recentActive = make(map[uint64]bool)
+	r.recentActive[r.id] = true
 	//设置nextInts和matchInts
 	index := r.RaftLog.LastIndex()
 	for peer := range r.Prs {
@@ -914,10 +966,7 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 		//}
 
 	case pb.MessageType_MsgHeartbeatResponse:
-		if r.State != StateLeader {
-			return
-		}
-
+		r.recentActive[m.From] = true
 		if m.Reject || m.Commit < r.RaftLog.committed {
 			r.sendAppend(m.From)
 		}
