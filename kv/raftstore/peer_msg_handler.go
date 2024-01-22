@@ -766,7 +766,7 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 
 				// 判断msg的region是不是这个region
 				if msg.Header.RegionId != d.regionId {
-					regionNotFound := &util.ErrRegionNotFound{RegionId: d.regionId}
+					regionNotFound := &util.ErrRegionNotFound{RegionId: msg.Header.RegionId}
 					resp := ErrResp(regionNotFound)
 					d.handleProposal(entry, resp)
 					log.Infof("Region %d peer %d failed ErrRegionNotFound check", d.regionId, d.PeerId())
@@ -911,7 +911,7 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 					case raft_cmdpb.CmdType_Snap:
 						if msg.Header.RegionEpoch.Version != d.Region().RegionEpoch.Version {
 							p.cb.Done(ErrResp(&util.ErrEpochNotMatch{}))
-							log.Infof("msg.Header.RegionEpoch.Version")
+							//log.Infof("msg.Header.RegionEpoch.Version")
 							return
 						}
 						resp.Responses = []*raft_cmdpb.Response{{CmdType: raft_cmdpb.CmdType_Snap,
