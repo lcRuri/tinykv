@@ -829,18 +829,20 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 					return
 				}
 				//注册
-				d.ctx.router.register(newPeer)
+				d.ctx.storeMeta.Lock()
 				d.ctx.storeMeta.regionRanges.ReplaceOrInsert(&regionItem{region: region})
 				d.ctx.storeMeta.regions[newRegionId] = region
-				meta.WriteRegionState(kvWB, region, rspb.PeerState_Normal)
 
 				// 2.原来的继承拆分前的元数据，修改Range 和 RegionEpoch
 				d.Region().RegionEpoch.Version++
 				d.Region().EndKey = splitKey
 				d.ctx.storeMeta.regionRanges.ReplaceOrInsert(&regionItem{d.Region()})
-				meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
+				d.ctx.storeMeta.Unlock()
 
+				meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
+				meta.WriteRegionState(kvWB, region, rspb.PeerState_Normal)
 				//启动
+				d.ctx.router.register(newPeer)
 				d.ctx.router.send(newRegionId, message.Msg{RegionID: newRegionId, Type: message.MsgTypeStart})
 
 				//callback 将拆分好的两个region返回
