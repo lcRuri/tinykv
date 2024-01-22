@@ -793,7 +793,7 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 				}
 
 				//当raft层通过共识以后，这边需要做的是，
-				// 1.拆分本身的区域
+				// 1.排序 确保生成的新region中peer的顺序是一致的 方便split
 				length := len(d.Region().Peers)
 				// sort to ensure the order between different peers
 				for i := 0; i < length; i++ {
@@ -855,7 +855,6 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 				}
 
 				d.handleProposal(entry, resp)
-
 				log.Infof("split done")
 			}
 		}
