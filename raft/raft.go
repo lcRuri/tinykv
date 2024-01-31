@@ -542,16 +542,7 @@ func (r *Raft) Step(m pb.Message) error {
 	case StateFollower:
 		//本地消息，需要发起一次election
 		if m.MsgType == pb.MessageType_MsgHup {
-			r.becomeCandidate()
-			for peer := range r.Prs {
-				if peer == r.id {
-					continue
-				} else {
-					//todo 区别是否已经有了日志
-					r.sendHeartbeat(peer)
-					//log.Infof("raft:%d send msg to raft:%d", r.id, peer)
-				}
-			}
+			r.campaign()
 		}
 
 		//处理心跳或者请求投票
@@ -576,28 +567,13 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 
 		if m.MsgType == pb.MessageType_MsgTimeoutNow {
-
-			r.becomeCandidate()
-			for peer := range r.Prs {
-				if peer == r.id {
-					continue
-				} else {
-					r.sendHeartbeat(peer)
-				}
-			}
+			r.campaign()
 		}
 
 	case StateCandidate:
 		//发起投票
 		if m.MsgType == pb.MessageType_MsgHup {
-			r.becomeCandidate()
-			for peer := range r.Prs {
-				if peer == r.id {
-					continue
-				} else {
-					r.sendHeartbeat(peer)
-				}
-			}
+			r.campaign()
 		}
 
 		if m.MsgType == pb.MessageType_MsgRequestVote {
@@ -651,6 +627,11 @@ func (r *Raft) Step(m pb.Message) error {
 		if m.MsgType == pb.MessageType_MsgSnapshot {
 			r.handleSnapshot(m)
 		}
+
+		if m.MsgType == pb.MessageType_MsgTimeoutNow {
+			r.campaign()
+		}
+
 	case StateLeader:
 		if m.MsgType == pb.MessageType_MsgBeat {
 			for peer := range r.Prs {
@@ -693,6 +674,9 @@ func (r *Raft) Step(m pb.Message) error {
 			r.handleTransferLeader(m)
 		}
 
+		if m.MsgType == pb.MessageType_MsgTimeoutNow {
+			r.campaign()
+		}
 	}
 
 	return nil

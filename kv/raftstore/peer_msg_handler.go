@@ -81,7 +81,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 			}
 
 			d.peerStorage.applyState.AppliedIndex = entry.Index
-			err := kvWB.SetMeta(meta.ApplyStateKey(d.regionId), d.peerStorage.applyState)
+			err = kvWB.SetMeta(meta.ApplyStateKey(d.regionId), d.peerStorage.applyState)
 			if err != nil {
 				panic(err)
 			}
@@ -207,8 +207,8 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 				panic(err)
 			}
 			p := &proposal{index: d.nextProposalIndex(), term: d.Term(), cb: cb}
-			d.proposals = append(d.proposals, p)
 
+			d.proposals = append(d.proposals, p)
 			err = d.RaftGroup.Propose(data)
 			if err != nil {
 				panic(err)
@@ -267,9 +267,9 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 				term:  d.Term(),
 				cb:    cb,
 			}
+			d.proposals = append(d.proposals, p)
 			_ = d.RaftGroup.Propose(data)
 
-			d.proposals = append(d.proposals, p)
 		}
 	}
 
@@ -768,23 +768,34 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 					return
 				}
 
+				err = util.CheckRegionEpoch(msg, d.Region(), true)
+				if errEpochNotMatching, ok := err.(*util.ErrEpochNotMatch); ok {
+					siblingRegion := d.findSiblingRegion()
+					if siblingRegion != nil {
+						errEpochNotMatching.Regions = append(errEpochNotMatching.Regions, siblingRegion)
+					}
+					d.handleProposal(entry, ErrResp(errEpochNotMatching))
+					log.Infof("CheckRegionEpoch failed err:%s", err.Error())
+
+					return
+				}
+				//if err = util.CheckRegionEpoch(msg, d.Region(), true); err != nil {
+				//	if errEpochNotMatching, ok := err.(*util.ErrEpochNotMatch); ok {
+				//		siblingRegion := d.findSiblingRegion()
+				//		if siblingRegion != nil {
+				//			errEpochNotMatching.Regions = append(errEpochNotMatching.Regions, siblingRegion)
+				//		}
+				//		d.handleProposal(entry, ErrResp(errEpochNotMatching))
+				//		log.Infof("CheckRegionEpoch failed err:%s", err.Error())
+				//		return
+				//	}
+				//}
+
 				//判断splitkey是否在当前region
-				if err := util.CheckKeyInRegion(splitKey, d.Region()); err != nil {
+				if err = util.CheckKeyInRegion(splitKey, d.Region()); err != nil {
 					d.handleProposal(entry, ErrResp(err))
 					log.Infof("Region %d peer %d failed KeyInRegion check err:%s", d.regionId, d.PeerId(), err.Error())
 					return
-				}
-
-				if err := util.CheckRegionEpoch(msg, d.Region(), true); err != nil {
-					if errEpochNotMatching, ok := err.(*util.ErrEpochNotMatch); ok {
-						siblingRegion := d.findSiblingRegion()
-						if siblingRegion != nil {
-							errEpochNotMatching.Regions = append(errEpochNotMatching.Regions, siblingRegion)
-						}
-						d.handleProposal(entry, ErrResp(errEpochNotMatching))
-						log.Infof("CheckRegionEpoch failed err:%s", err.Error())
-						return
-					}
 				}
 
 				//当raft层通过共识以后，这边需要做的是，
@@ -818,7 +829,9 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 					},
 					Peers: peers,
 				}
-				newPeer, err := createPeer(d.storeID(), d.ctx.cfg, d.ctx.splitCheckTaskSender, d.ctx.engine, region)
+
+				//创建的peer d.ctx.regionTaskSender 而不是split
+				newPeer, err := createPeer(d.storeID(), d.ctx.cfg, d.ctx.regionTaskSender, d.ctx.engine, region)
 				if err != nil {
 					log.Infof("createPeer err:%s", err.Error())
 					return
@@ -885,7 +898,6 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 
 			if p.index == entry.Index {
 				if p.term != entry.Term {
-					//log.Infof(" p.term != entry.Term")
 					NotifyStaleReq(entry.Term, p.cb)
 				} else {
 					resp := &raft_cmdpb.RaftCmdResponse{Header: &raft_cmdpb.RaftResponseHeader{}}
@@ -893,10 +905,6 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 					switch req.CmdType {
 					case raft_cmdpb.CmdType_Get:
 						value, _ := engine_util.GetCF(d.peerStorage.Engines.Kv, req.Get.Cf, req.Get.Key)
-						//if err != nil {
-						//	p.cb.Done(ErrResp(err))
-						//	return
-						//}
 						resp.Responses = []*raft_cmdpb.Response{{CmdType: raft_cmdpb.CmdType_Get,
 							Get: &raft_cmdpb.GetResponse{Value: value}}}
 					case raft_cmdpb.CmdType_Put:
@@ -924,66 +932,132 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 	}
 }
 
+//func (d *peerMsgHandler) processConfChange(entry *eraftpb.Entry, kvWB *engine_util.WriteBatch) {
+//	//在ProposeConfChange函数中pb.ConfChange序列化到entry的data中
+//	cc := &eraftpb.ConfChange{}
+//	err := cc.Unmarshal(entry.Data)
+//	if err != nil {
+//		panic(err)
+//	}
+//	//在proposeRaftCommand函数中将msg序列化到ConfChange的ctx中
+//	msg := *&raft_cmdpb.RaftCmdRequest{}
+//	err = msg.Unmarshal(cc.Context)
+//	if err != nil {
+//		panic(err)
+//	}
+//	//在raft先增加或者移除节点
+//	d.RaftGroup.ApplyConfChange(*cc)
+//
+//	if cc.ChangeType == eraftpb.ConfChangeType_AddNode {
+//		//已经存在
+//		if d.isNodeExist(cc.NodeId) {
+//			return
+//		}
+//		d.Region().RegionEpoch.ConfVer++
+//		//创建新的peer
+//		newPeer := &metapb.Peer{
+//			Id:      cc.NodeId,
+//			StoreId: msg.AdminRequest.ChangePeer.Peer.StoreId,
+//		}
+//		//log.Infof("add:%d", cc.NodeId)
+//		//添加到region中并且更改RegionEpoch
+//		d.Region().Peers = append(d.Region().Peers, newPeer)
+//
+//		meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
+//	} else if cc.ChangeType == eraftpb.ConfChangeType_RemoveNode {
+//		//如果是本身删除自身
+//		//log.Infof("remove:%d", cc.NodeId)
+//		if cc.NodeId == d.PeerId() {
+//			kvWB.DeleteMeta(meta.ApplyStateKey(d.regionId))
+//			d.destroyPeer()
+//			return
+//		}
+//
+//		//如果不是本身，从自己的region中删除
+//		if d.isNodeExist(cc.NodeId) {
+//			d.Region().RegionEpoch.ConfVer++
+//			deleteFromRegion(d.Region(), cc.NodeId)
+//			meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
+//			d.removePeerCache(cc.NodeId)
+//		}
+//
+//	}
+//
+//	//还有msg要处理
+//	resp := &raft_cmdpb.RaftCmdResponse{
+//		Header: &raft_cmdpb.RaftResponseHeader{},
+//		AdminResponse: &raft_cmdpb.AdminResponse{
+//			CmdType:    raft_cmdpb.AdminCmdType_ChangePeer,
+//			ChangePeer: &raft_cmdpb.ChangePeerResponse{},
+//		}}
+//
+//	d.handleProposal(entry, resp)
+//}
+
 func (d *peerMsgHandler) processConfChange(entry *eraftpb.Entry, kvWB *engine_util.WriteBatch) {
-	//在ProposeConfChange函数中pb.ConfChange序列化到entry的data中
+	// Implement in 3A, need to use RawNode.ApplyConfChange
 	cc := &eraftpb.ConfChange{}
 	err := cc.Unmarshal(entry.Data)
 	if err != nil {
 		panic(err)
 	}
-	//在proposeRaftCommand函数中将msg序列化到ConfChange的ctx中
-	msg := *&raft_cmdpb.RaftCmdRequest{}
+	msg := &raft_cmdpb.RaftCmdRequest{}
 	err = msg.Unmarshal(cc.Context)
 	if err != nil {
 		panic(err)
 	}
-	//在raft先增加或者移除节点
 	d.RaftGroup.ApplyConfChange(*cc)
 
-	if cc.ChangeType == eraftpb.ConfChangeType_AddNode {
-		//已经存在
-		if d.isNodeExist(cc.NodeId) {
-			return
+	// 3B: change the RegionLocalState, including RegionEpoch and Peers in Region
+	switch cc.ChangeType {
+	case eraftpb.ConfChangeType_AddNode:
+		//println(d.PeerId(), "cc.NodeId:", cc.NodeId)
+		if !isPeerExists(d.Region(), cc.NodeId) {
+			// ignore the duplicate commands of the same conf change
+			//log.Infof("add:%d", cc.NodeId)
+			// d.ctx.storeMeta.Lock()
+			d.Region().RegionEpoch.ConfVer++
+			peer := &metapb.Peer{
+				Id:      cc.NodeId,
+				StoreId: msg.AdminRequest.ChangePeer.Peer.StoreId,
+			}
+			d.Region().Peers = append(d.Region().Peers, peer)
+			meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
+			//d.ctx.storeMeta.regions[d.Region().Id] = d.Region()
+			//d.ctx.storeMeta.Unlock()
 		}
-		d.Region().RegionEpoch.ConfVer++
-		//创建新的peer
-		newPeer := &metapb.Peer{
-			Id:      cc.NodeId,
-			StoreId: msg.AdminRequest.ChangePeer.Peer.StoreId,
-		}
-		//log.Infof("add:%d", cc.NodeId)
-		//添加到region中并且更改RegionEpoch
-		d.Region().Peers = append(d.Region().Peers, newPeer)
-
-		meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
-	} else if cc.ChangeType == eraftpb.ConfChangeType_RemoveNode {
-		//如果是本身删除自身
+	case eraftpb.ConfChangeType_RemoveNode:
+		// destroy itself
 		//log.Infof("remove:%d", cc.NodeId)
+
 		if cc.NodeId == d.PeerId() {
 			kvWB.DeleteMeta(meta.ApplyStateKey(d.regionId))
 			d.destroyPeer()
-			return
+			break
 		}
-
-		//如果不是本身，从自己的region中删除
-		if d.isNodeExist(cc.NodeId) {
+		// if not itself, delete it from region
+		if isPeerExists(d.Region(), cc.NodeId) {
+			//  ignore the duplicate commands of the same conf change
+			//d.ctx.storeMeta.Lock()
 			d.Region().RegionEpoch.ConfVer++
 			deleteFromRegion(d.Region(), cc.NodeId)
 			meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
 			d.removePeerCache(cc.NodeId)
+			//d.ctx.storeMeta.regions[d.Region().Id] = d.Region()
+			//d.ctx.storeMeta.Unlock()
+
 		}
-
 	}
-
-	//还有msg要处理
+	// callback
 	resp := &raft_cmdpb.RaftCmdResponse{
 		Header: &raft_cmdpb.RaftResponseHeader{},
 		AdminResponse: &raft_cmdpb.AdminResponse{
 			CmdType:    raft_cmdpb.AdminCmdType_ChangePeer,
 			ChangePeer: &raft_cmdpb.ChangePeerResponse{},
-		}}
-
+		},
+	}
 	d.handleProposal(entry, resp)
+	return
 }
 
 func (d *peerMsgHandler) handleProposal(entry *eraftpb.Entry, resp *raft_cmdpb.RaftCmdResponse) {
@@ -1041,12 +1115,11 @@ func newCompactLogRequest(regionID uint64, peer *metapb.Peer, compactIndex, comp
 	return req
 }
 
-func (d *peerMsgHandler) isNodeExist(id uint64) bool {
-	for _, p := range d.Region().Peers {
-		if p.GetId() == id {
+func isPeerExists(region *metapb.Region, id uint64) bool {
+	for _, p := range region.Peers {
+		if p.Id == id {
 			return true
 		}
 	}
-
 	return false
 }
