@@ -264,7 +264,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 		<-ch_clients
 		//log.Infof("clients ok\n")
 		if crash {
-			//log.Warnf("shutdown servers\n")
+			log.Warnf("shutdown servers\n")
 			for i := 1; i <= nservers; i++ {
 				cluster.StopServer(uint64(i))
 			}

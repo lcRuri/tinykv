@@ -245,7 +245,8 @@ func (bs *Raftstore) start(
 		trans:               trans,
 		schedulerTaskSender: bs.workers.schedulerWorker.Sender(),
 		// here
-		regionTaskSender:     bs.workers.regionWorker.Sender(),
+		regionTaskSender: bs.workers.regionWorker.Sender(),
+		// split worker 入口
 		splitCheckTaskSender: bs.workers.splitCheckWorker.Sender(),
 		raftLogGCTaskSender:  bs.workers.raftLogGCWorker.Sender(),
 		schedulerClient:      schedulerClient,

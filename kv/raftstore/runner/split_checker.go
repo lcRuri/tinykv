@@ -33,7 +33,8 @@ func NewSplitCheckHandler(engine *badger.DB, router message.RaftRouter, conf *co
 	return runner
 }
 
-/// run checks a region with split checkers to produce split keys and generates split admin command.
+// / run checks a region with split checkers to produce split keys and generates split admin command.
+// run函数使用分裂检查器(split checkers)对一个region进行检查,以产生分裂键(split keys),并生成分裂管理命令(split admin command)。
 func (r *splitCheckHandler) Handle(t worker.Task) {
 	spCheckTask, ok := t.(*SplitCheckTask)
 	if !ok {
@@ -50,6 +51,8 @@ func (r *splitCheckHandler) Handle(t worker.Task) {
 		if err == nil {
 			// It's not a raw key.
 			// To make sure the keys of same user key locate in one Region, decode and then encode to truncate the timestamp
+			// 它不是原始密钥。
+			// 要确保同一用户密钥的密钥位于一个区域中，请解码，然后编码以截断时间戳
 			key = codec.EncodeBytes(userKey)
 		}
 		msg := message.Msg{
@@ -69,7 +72,8 @@ func (r *splitCheckHandler) Handle(t worker.Task) {
 	}
 }
 
-/// SplitCheck gets the split keys by scanning the range.
+// / SplitCheck gets the split keys by scanning the range.
+// splitCheck 通过扫描范围获取拆分键。
 func (r *splitCheckHandler) splitCheck(regionID uint64, startKey, endKey []byte) []byte {
 	txn := r.engine.NewTransaction(false)
 	defer txn.Discard()

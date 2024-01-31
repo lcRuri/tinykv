@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"github.com/pingcap-incubator/tinykv/log"
 	"io/ioutil"
 	"math/rand"
 	"os"
@@ -194,7 +195,7 @@ func (c *Cluster) Request(key []byte, reqs []*raft_cmdpb.Request, timeout time.D
 		resp, txn := c.CallCommandOnLeader(&req, timeout)
 		if resp == nil {
 			// it should be timeouted innerly
-			//log.Infof("resp is nil")
+			log.Infof("req:%v resp is nil", req)
 			SleepMS(100)
 			continue
 		}
