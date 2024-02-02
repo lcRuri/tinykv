@@ -401,8 +401,8 @@ func (ps *PeerStorage) ApplySnapshot(snapshot *eraftpb.Snapshot, kvWB *engine_ut
 	ps.regionSched <- &runner.RegionTaskApply{
 		RegionId: snapData.Region.GetId(),
 		SnapMeta: snapshot.Metadata,
-		StartKey: ps.region.GetStartKey(),
-		EndKey:   ps.region.GetEndKey(),
+		StartKey: snapData.Region.GetStartKey(),
+		EndKey:   snapData.Region.GetEndKey(),
 		Notifier: ch,
 	}
 
