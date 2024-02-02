@@ -225,18 +225,16 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 			}
 			_ = d.RaftGroup.Propose(data)
 		case raft_cmdpb.AdminCmdType_TransferLeader:
-			id := msg.AdminRequest.TransferLeader.Peer.Id
+			id := req.TransferLeader.Peer.Id
 			d.RaftGroup.TransferLeader(id)
 			cb.Done(&raft_cmdpb.RaftCmdResponse{
+				Header: &raft_cmdpb.RaftResponseHeader{},
 				AdminResponse: &raft_cmdpb.AdminResponse{
 					CmdType:        raft_cmdpb.AdminCmdType_TransferLeader,
 					TransferLeader: &raft_cmdpb.TransferLeaderResponse{},
 				}})
 		case raft_cmdpb.AdminCmdType_ChangePeer:
-			ctx, err := msg.Marshal()
-			if err != nil {
-				return
-			}
+			ctx, _ := msg.Marshal()
 			confChange := eraftpb.ConfChange{
 				ChangeType: req.ChangePeer.ChangeType,
 				NodeId:     req.ChangePeer.Peer.Id,
@@ -852,7 +850,7 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 				}
 
 				d.handleProposal(entry, resp)
-				log.Infof("split done")
+				//log.Infof("split done")
 			}
 		}
 	}
@@ -893,10 +891,6 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 					switch req.CmdType {
 					case raft_cmdpb.CmdType_Get:
 						value, _ := engine_util.GetCF(d.peerStorage.Engines.Kv, req.Get.Cf, req.Get.Key)
-						//if err != nil {
-						//	p.cb.Done(ErrResp(err))
-						//	return
-						//}
 						resp.Responses = []*raft_cmdpb.Response{{CmdType: raft_cmdpb.CmdType_Get,
 							Get: &raft_cmdpb.GetResponse{Value: value}}}
 					case raft_cmdpb.CmdType_Put:
@@ -1041,7 +1035,7 @@ func newCompactLogRequest(regionID uint64, peer *metapb.Peer, compactIndex, comp
 
 func (d *peerMsgHandler) isNodeExist(region *metapb.Region, id uint64) bool {
 	for _, p := range region.Peers {
-		if p.GetId() == id {
+		if p.Id == id {
 			return true
 		}
 	}
