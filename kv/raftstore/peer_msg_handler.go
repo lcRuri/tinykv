@@ -767,23 +767,21 @@ func (d *peerMsgHandler) process(entry *eraftpb.Entry, kvWB *engine_util.WriteBa
 					return
 				}
 
-				//判断splitkey是否在当前region
-				if err := util.CheckKeyInRegion(splitKey, d.Region()); err != nil {
-					d.handleProposal(entry, ErrResp(err))
-					log.Infof("Region %d peer %d failed KeyInRegion check err:%s", d.regionId, d.PeerId(), err.Error())
+				err = util.CheckRegionEpoch(msg, d.Region(), true)
+				if errEpochNotMatching, ok := err.(*util.ErrEpochNotMatch); ok {
+					siblingRegion := d.findSiblingRegion()
+					if siblingRegion != nil {
+						errEpochNotMatching.Regions = append(errEpochNotMatching.Regions, siblingRegion)
+					}
+					d.handleProposal(entry, ErrResp(errEpochNotMatching))
 					return
 				}
 
-				if err := util.CheckRegionEpoch(msg, d.Region(), true); err != nil {
-					if errEpochNotMatching, ok := err.(*util.ErrEpochNotMatch); ok {
-						siblingRegion := d.findSiblingRegion()
-						if siblingRegion != nil {
-							errEpochNotMatching.Regions = append(errEpochNotMatching.Regions, siblingRegion)
-						}
-						d.handleProposal(entry, ErrResp(errEpochNotMatching))
-						log.Infof("CheckRegionEpoch failed err:%s", err.Error())
-						return
-					}
+				//判断splitkey是否在当前region
+				if err = util.CheckKeyInRegion(splitKey, d.Region()); err != nil {
+					d.handleProposal(entry, ErrResp(err))
+					log.Infof("Region %d peer %d failed KeyInRegion check err:%s", d.regionId, d.PeerId(), err.Error())
+					return
 				}
 
 				//当raft层通过共识以后，这边需要做的是，
@@ -987,7 +985,6 @@ func (d *peerMsgHandler) handleProposal(entry *eraftpb.Entry, resp *raft_cmdpb.R
 			p.cb.Done(ErrResp(&util.ErrStaleCommand{}))
 			d.proposals = d.proposals[1:]
 			if len(d.proposals) == 0 {
-				//log.Infof("nilllll")
 				return
 			}
 			p = d.proposals[0]
