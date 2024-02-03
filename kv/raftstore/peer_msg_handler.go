@@ -61,6 +61,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 		d.peerStorage.SetRegion(result.Region)
 		d.ctx.storeMeta.Lock()
 		d.ctx.storeMeta.regions[d.Region().Id] = d.Region()
+		d.ctx.storeMeta.regionRanges.ReplaceOrInsert(&regionItem{region: d.Region()})
 		d.ctx.storeMeta.Unlock()
 	}
 
