@@ -925,7 +925,7 @@ func (d *peerMsgHandler) processConfChange(entry *eraftpb.Entry, kvWB *engine_ut
 		panic(err)
 	}
 	//在proposeRaftCommand函数中将msg序列化到ConfChange的ctx中
-	msg := *&raft_cmdpb.RaftCmdRequest{}
+	msg := &raft_cmdpb.RaftCmdRequest{}
 	err = msg.Unmarshal(cc.Context)
 	if err != nil {
 		panic(err)
