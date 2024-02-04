@@ -117,6 +117,8 @@ func (c *RaftCluster) isInitialized() bool {
 // loadBootstrapTime loads the saved bootstrap time from etcd. It returns zero
 // value of time.Time when there is error or the cluster is not bootstrapped
 // yet.
+// loadBootstrapTime从etcd加载保存的引导时间。它返回0
+// 时间的值当出现错误或集群未启动
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
 	data, err := c.s.storage.Load(c.s.storage.ClusterStatePath("raft_bootstrap_time"))
@@ -279,6 +281,34 @@ func (c *RaftCluster) handleStoreHeartbeat(stats *schedulerpb.StoreStats) error 
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Your Code Here (3C).
+	//进行判断是否需要更新本地区域记录
+	//查看本地存储中是否存在相同Id的region
+	regionInfo := c.core.Regions.GetRegion(region.GetID())
+	regionEpoch := regionInfo.GetRegionEpoch()
+	if regionEpoch == nil {
+		return nil
+	}
+	//If the new one’s version or conf_ver is greater than the original one, it cannot be skipped
+	if regionEpoch.Version < region.GetRegionEpoch().Version || regionEpoch.ConfVer < region.GetRegionEpoch().ConfVer {
+		// update region tree and store status
+
+	}
+
+	//If the leader changed, it cannot be skipped
+	cleader := regionInfo.GetLeader()
+	if cleader != region.GetLeader() {
+
+	}
+
+	//if the new one or original one has pending peer, it cannot be skipped
+	if len(region.GetPendingPeers()) != 0 || len(regionInfo.GetPendingPeers()) != 0 {
+
+	}
+
+	//If the ApproximateSize changed, it cannot be skipped
+	if regionInfo.GetApproximateSize() != region.GetApproximateSize() {
+
+	}
 
 	return nil
 }
