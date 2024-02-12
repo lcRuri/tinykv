@@ -16,6 +16,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"github.com/pingcap-incubator/tinykv/kv/raftstore/util"
 	"path"
 	"sync"
 	"time"
@@ -283,33 +284,35 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Your Code Here (3C).
 	//进行判断是否需要更新本地区域记录
 	//查看本地存储中是否存在相同Id的region
-	regionInfo := c.core.Regions.GetRegion(region.GetID())
-	regionEpoch := regionInfo.GetRegionEpoch()
-	if regionEpoch == nil {
-		return nil
-	}
-	//If the new one’s version or conf_ver is greater than the original one, it cannot be skipped
-	if regionEpoch.Version < region.GetRegionEpoch().Version || regionEpoch.ConfVer < region.GetRegionEpoch().ConfVer {
-		// update region tree and store status
-
-	}
-
-	//If the leader changed, it cannot be skipped
-	cleader := regionInfo.GetLeader()
-	if cleader != region.GetLeader() {
-
-	}
-
-	//if the new one or original one has pending peer, it cannot be skipped
-	if len(region.GetPendingPeers()) != 0 || len(regionInfo.GetPendingPeers()) != 0 {
-
+	regionInfo := c.GetRegion(region.GetID())
+	//If there isn’t, scan all regions that overlap with it.
+	if regionInfo == nil {
+		localRegions := c.ScanRegions(region.GetStartKey(), region.GetEndKey(), -1)
+		for _, localRegion := range localRegions {
+			if localRegion.GetRegionEpoch() == nil || region.GetRegionEpoch() == nil {
+				return errors.New("RegionEpoch is nil")
+			}
+			//The heartbeats’ conf_ver and version should be greater or equal than all of them, or the region is stale
+			if util.IsEpochStale(region.GetRegionEpoch(), localRegion.GetRegionEpoch()) {
+				return errors.New("Epoch is stale")
+			}
+		}
+	} else {
+		if util.IsEpochStale(region.GetRegionEpoch(), regionInfo.GetRegionEpoch()) {
+			return errors.New("Epoch is stale")
+		}
 	}
 
-	//If the ApproximateSize changed, it cannot be skipped
-	if regionInfo.GetApproximateSize() != region.GetApproximateSize() {
-
+	//there are two things it should update: region tree and store status.
+	//You could use RaftCluster.core.PutRegion to update the region tree
+	err := c.putRegion(region)
+	if err != nil {
+		return err
 	}
-
+	//use RaftCluster.core.UpdateStoreStatus to update related store’s status
+	for storeId := range region.GetStoreIds() {
+		c.updateStoreStatusLocked(storeId)
+	}
 	return nil
 }
 
