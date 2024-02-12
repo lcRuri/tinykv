@@ -34,6 +34,7 @@ type Scheduler interface {
 	// GetType should in accordance with the name passing to schedule.RegisterScheduler()
 	GetType() string
 	EncodeConfig() ([]byte, error)
+	// GetMinInterval 使用GetMinInterval的返回值作为默认间隔，定期运行Schedule方法
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
 	Prepare(cluster opt.Cluster) error
@@ -84,6 +85,8 @@ var schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
 
 // RegisterScheduler binds a scheduler creator. It should be called in init()
 // func of a package.
+// RegisterScheduler 绑定调度程序创建者。它应该在 init（） 中调用
+// func 的包。
 func RegisterScheduler(typ string, createFn CreateSchedulerFunc) {
 	if _, ok := schedulerMap[typ]; ok {
 		log.Fatal("duplicated scheduler", zap.String("type", typ))
@@ -93,6 +96,8 @@ func RegisterScheduler(typ string, createFn CreateSchedulerFunc) {
 
 // RegisterSliceDecoderBuilder convert arguments to config. It should be called in init()
 // func of package.
+// RegisterSliceDecoderBuilder 将参数转换为配置。它应该在 init（） 中调用
+// 包的功能。
 func RegisterSliceDecoderBuilder(typ string, builder ConfigSliceDecoderBuilder) {
 	if _, ok := schedulerArgsToDecoder[typ]; ok {
 		log.Fatal("duplicated scheduler", zap.String("type", typ))

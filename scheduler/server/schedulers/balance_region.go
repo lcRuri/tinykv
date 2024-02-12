@@ -58,6 +58,7 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, opts .
 }
 
 // BalanceRegionCreateOption is used to create a scheduler with an option.
+// BalanceRegionCreateOption 用于创建带有选项的调度程序
 type BalanceRegionCreateOption func(s *balanceRegionScheduler)
 
 func (s *balanceRegionScheduler) GetName() string {
@@ -77,6 +78,17 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 
 func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) *operator.Operator {
 	// Your Code Here (3C).
+	//选择要移动的区域 pending->follower->leader-> smaller region size
+	// it will try to select a pending region because pending may mean the disk is overloaded.
+	stores := cluster.GetStores()
+	for _, store := range stores {
 
+		cluster.GetPendingRegionsWithLock(store.GetID(), func(container core.RegionsContainer) {
+
+		})
+
+	}
+
+	//select a store as the target.
 	return nil
 }

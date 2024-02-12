@@ -33,6 +33,7 @@ type Options interface {
 
 // Cluster provides an overview of a cluster's regions distribution.
 // TODO: This interface should be moved to a better place.
+// Cluster提供集群区域分布的概述。
 type Cluster interface {
 	core.RegionSetInformer
 	core.StoreSetInformer
