@@ -18,6 +18,7 @@ import (
 	"github.com/pingcap-incubator/tinykv/scheduler/server/schedule"
 	"github.com/pingcap-incubator/tinykv/scheduler/server/schedule/operator"
 	"github.com/pingcap-incubator/tinykv/scheduler/server/schedule/opt"
+	"sort"
 )
 
 func init() {
@@ -79,16 +80,73 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) *operator.Operator {
 	// Your Code Here (3C).
 	//选择要移动的区域 pending->follower->leader-> smaller region size
-	// it will try to select a pending region because pending may mean the disk is overloaded.
+	// 先选store 再选region
 	stores := cluster.GetStores()
+	tmpStore := make([]*core.StoreInfo, 0)
 	for _, store := range stores {
+		if store.IsUp() && store.DownTime() <= cluster.GetMaxStoreDownTime() {
+			tmpStore = append(tmpStore, store)
+		}
+	}
 
-		cluster.GetPendingRegionsWithLock(store.GetID(), func(container core.RegionsContainer) {
+	if len(tmpStore) <= 1 {
+		return nil
+	}
 
+	// sort to find max and min store size
+	sort.Slice(tmpStore, func(i, j int) bool {
+		return tmpStore[i].GetRegionSize() > tmpStore[j].GetRegionSize()
+	})
+
+	suitablePendingRegion := make([]*core.RegionInfo, 0)
+	suitableFollowerRegion := make([]*core.RegionInfo, 0)
+	suitableLeaderRegion := make([]*core.RegionInfo, 0)
+	// it will try to select a pending region because pending may mean the disk is overloaded.
+	for _, storeInfo := range tmpStore {
+		var tmpRegionInfo *core.RegionInfo
+		cluster.GetPendingRegionsWithLock(storeInfo.GetID(), func(container core.RegionsContainer) {
+			tmpRegionInfo = container.RandomRegion(nil, nil)
 		})
+
+		if tmpRegionInfo != nil {
+			suitablePendingRegion = append(suitablePendingRegion, tmpRegionInfo)
+		}
+	}
+	if len(suitablePendingRegion) == 0 {
+		//If there isn’t a pending region, it will try to find a follower region
+		for _, storeInfo := range tmpStore {
+			var tmpRegionInfo *core.RegionInfo
+			cluster.GetFollowersWithLock(storeInfo.GetID(), func(container core.RegionsContainer) {
+				tmpRegionInfo = container.RandomRegion(nil, nil)
+			})
+
+			if tmpRegionInfo != nil {
+				suitableFollowerRegion = append(suitableFollowerRegion, tmpRegionInfo)
+			}
+		}
+		if len(suitableFollowerRegion) == 0 {
+			for _, storeInfo := range tmpStore {
+				var tmpRegionInfo *core.RegionInfo
+				cluster.GetLeadersWithLock(storeInfo.GetID(), func(container core.RegionsContainer) {
+					tmpRegionInfo = container.RandomRegion(nil, nil)
+				})
+
+				if tmpRegionInfo != nil {
+					suitableLeaderRegion = append(suitableLeaderRegion, tmpRegionInfo)
+				}
+			}
+		}
 
 	}
 
-	//select a store as the target.
-	return nil
+	//make sure that the difference has to be bigger than two times the approximate size of the region
+	originStore := tmpStore[0]
+	targetStore := tmpStore[len(tmpStore)-1]
+
+	op, err := operator.CreateMovePeerOperator("", cluster, suitablePendingRegion[0], operator.OpBalance, originStore.GetID(), targetStore.GetID(), 0)
+	if err != nil {
+		return nil
+	}
+
+	return op
 }
