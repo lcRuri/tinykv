@@ -98,52 +98,66 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) *operator.Operato
 		return tmpStore[i].GetRegionSize() > tmpStore[j].GetRegionSize()
 	})
 
-	suitablePendingRegion := make([]*core.RegionInfo, 0)
-	suitableFollowerRegion := make([]*core.RegionInfo, 0)
-	suitableLeaderRegion := make([]*core.RegionInfo, 0)
+	originStore := &core.StoreInfo{}
+	var pendingRegionInfo *core.RegionInfo
+	var followerRegionInfo *core.RegionInfo
+	var leaderRegionInfo *core.RegionInfo
+
 	// it will try to select a pending region because pending may mean the disk is overloaded.
 	for _, storeInfo := range tmpStore {
-		var tmpRegionInfo *core.RegionInfo
 		cluster.GetPendingRegionsWithLock(storeInfo.GetID(), func(container core.RegionsContainer) {
-			tmpRegionInfo = container.RandomRegion(nil, nil)
+			pendingRegionInfo = container.RandomRegion(nil, nil)
 		})
 
-		if tmpRegionInfo != nil {
-			suitablePendingRegion = append(suitablePendingRegion, tmpRegionInfo)
+		if pendingRegionInfo != nil {
+			originStore = storeInfo
+			break
 		}
 	}
-	if len(suitablePendingRegion) == 0 {
-		//If there isn’t a pending region, it will try to find a follower region
+
+	if pendingRegionInfo == nil {
+		//find follower region
 		for _, storeInfo := range tmpStore {
-			var tmpRegionInfo *core.RegionInfo
 			cluster.GetFollowersWithLock(storeInfo.GetID(), func(container core.RegionsContainer) {
-				tmpRegionInfo = container.RandomRegion(nil, nil)
+				followerRegionInfo = container.RandomRegion(nil, nil)
 			})
 
-			if tmpRegionInfo != nil {
-				suitableFollowerRegion = append(suitableFollowerRegion, tmpRegionInfo)
+			if followerRegionInfo != nil {
+				originStore = storeInfo
+				break
 			}
 		}
-		if len(suitableFollowerRegion) == 0 {
+
+		if followerRegionInfo == nil {
 			for _, storeInfo := range tmpStore {
-				var tmpRegionInfo *core.RegionInfo
 				cluster.GetLeadersWithLock(storeInfo.GetID(), func(container core.RegionsContainer) {
-					tmpRegionInfo = container.RandomRegion(nil, nil)
+					leaderRegionInfo = container.RandomRegion(nil, nil)
 				})
 
-				if tmpRegionInfo != nil {
-					suitableLeaderRegion = append(suitableLeaderRegion, tmpRegionInfo)
+				if leaderRegionInfo != nil {
+					originStore = storeInfo
+					break
 				}
 			}
 		}
-
 	}
 
 	//make sure that the difference has to be bigger than two times the approximate size of the region
-	originStore := tmpStore[0]
 	targetStore := tmpStore[len(tmpStore)-1]
+	if originStore.GetRegionSize() <= 2*targetStore.GetRegionSize() {
+		return nil
+	}
 
-	op, err := operator.CreateMovePeerOperator("", cluster, suitablePendingRegion[0], operator.OpBalance, originStore.GetID(), targetStore.GetID(), 0)
+	var moveRegion *core.RegionInfo
+	if pendingRegionInfo != nil {
+		moveRegion = pendingRegionInfo
+	} else if followerRegionInfo != nil {
+		moveRegion = followerRegionInfo
+	} else {
+		moveRegion = leaderRegionInfo
+	}
+
+	op, err := operator.CreateMovePeerOperator("balance-move", cluster, moveRegion, operator.OpBalance, originStore.GetID(), targetStore.GetID(), moveRegion.GetPeers()[0].GetId())
 	if err != nil {
 		return nil
 	}
