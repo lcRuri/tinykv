@@ -84,6 +84,7 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) *operator.Operato
 	stores := cluster.GetStores()
 	tmpStore := make([]*core.StoreInfo, 0)
 	for _, store := range stores {
+		//In short, a suitable store should be up and the down time cannot be longer than `MaxStoreDownTime` of the cluster, which you can get through `cluster.GetMaxStoreDownTime()`.
 		if store.IsUp() && store.DownTime() <= cluster.GetMaxStoreDownTime() {
 			tmpStore = append(tmpStore, store)
 		}
@@ -156,8 +157,14 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) *operator.Operato
 	} else {
 		moveRegion = leaderRegionInfo
 	}
+	//If the difference is big enough, the Scheduler should allocate a new peer on the target store
+	allocPeer, err := cluster.AllocPeer(targetStore.GetID())
+	if err != nil {
+		return nil
+	}
 
-	op, err := operator.CreateMovePeerOperator("balance-move", cluster, moveRegion, operator.OpBalance, originStore.GetID(), targetStore.GetID(), moveRegion.GetPeers()[0].GetId())
+	//and create a move peer operator.
+	op, err := operator.CreateMovePeerOperator("balance-move", cluster, moveRegion, operator.OpBalance, originStore.GetID(), targetStore.GetID(), allocPeer.GetId())
 	if err != nil {
 		return nil
 	}
