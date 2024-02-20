@@ -114,32 +114,23 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) *operator.Operato
 			originStore = storeInfo
 			break
 		}
-	}
 
-	if pendingRegionInfo == nil {
-		//find follower region
-		for _, storeInfo := range tmpStore {
-			cluster.GetFollowersWithLock(storeInfo.GetID(), func(container core.RegionsContainer) {
-				followerRegionInfo = container.RandomRegion(nil, nil)
-			})
+		cluster.GetFollowersWithLock(storeInfo.GetID(), func(container core.RegionsContainer) {
+			followerRegionInfo = container.RandomRegion(nil, nil)
+		})
 
-			if followerRegionInfo != nil {
-				originStore = storeInfo
-				break
-			}
+		if followerRegionInfo != nil {
+			originStore = storeInfo
+			break
 		}
 
-		if followerRegionInfo == nil {
-			for _, storeInfo := range tmpStore {
-				cluster.GetLeadersWithLock(storeInfo.GetID(), func(container core.RegionsContainer) {
-					leaderRegionInfo = container.RandomRegion(nil, nil)
-				})
+		cluster.GetLeadersWithLock(storeInfo.GetID(), func(container core.RegionsContainer) {
+			leaderRegionInfo = container.RandomRegion(nil, nil)
+		})
 
-				if leaderRegionInfo != nil {
-					originStore = storeInfo
-					break
-				}
-			}
+		if leaderRegionInfo != nil {
+			originStore = storeInfo
+			break
 		}
 	}
 
