@@ -143,20 +143,28 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) *operator.Operato
 		}
 	}
 
-	//make sure that the difference has to be bigger than two times the approximate size of the region
-	targetStore := tmpStore[len(tmpStore)-1]
-	if originStore.GetRegionSize() <= 2*targetStore.GetRegionSize() {
-		return nil
-	}
-
 	var moveRegion *core.RegionInfo
 	if pendingRegionInfo != nil {
 		moveRegion = pendingRegionInfo
 	} else if followerRegionInfo != nil {
 		moveRegion = followerRegionInfo
-	} else {
+	} else if leaderRegionInfo != nil {
 		moveRegion = leaderRegionInfo
 	}
+
+	if moveRegion == nil {
+		return nil
+	}
+
+	//Actually, the Scheduler will select the store with the smallest region size
+	// todo
+
+	//make sure that the difference has to be bigger than two times the approximate size of the region
+	targetStore := tmpStore[len(tmpStore)-1]
+	if originStore.GetRegionSize()-targetStore.GetRegionSize() <= 2*moveRegion.GetApproximateSize() {
+		return nil
+	}
+
 	//If the difference is big enough, the Scheduler should allocate a new peer on the target store
 	allocPeer, err := cluster.AllocPeer(targetStore.GetID())
 	if err != nil {
