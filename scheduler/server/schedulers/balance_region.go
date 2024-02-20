@@ -157,7 +157,6 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) *operator.Operato
 	}
 
 	//Actually, the Scheduler will select the store with the smallest region size
-	// todo
 	moveRegionStores := cluster.GetRegionStores(moveRegion)
 	targetStores := make([]*core.StoreInfo, 0)
 	for _, store := range tmpStore {
@@ -179,6 +178,9 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) *operator.Operato
 		return targetStores[i].GetRegionSize() < targetStores[j].GetRegionSize()
 	})
 
+	if len(targetStores) == 0 {
+		return nil
+	}
 	//make sure that the difference has to be bigger than two times the approximate size of the region
 	targetStore := targetStores[0]
 	if originStore.GetRegionSize()-targetStore.GetRegionSize() <= 2*moveRegion.GetApproximateSize() {
