@@ -43,6 +43,11 @@ func (txn *MvccTxn) Writes() []storage.Modify {
 // PutWrite records a write at key and ts.
 func (txn *MvccTxn) PutWrite(key []byte, ts uint64, write *Write) {
 	// Your Code Here (4A).
+	txn.writes = append(txn.writes, storage.Modify{storage.Put{
+		Key:   EncodeKey(key, ts),
+		Value: write.ToBytes(),
+		Cf:    engine_util.CfWrite,
+	}})
 }
 
 // GetLock returns a lock if key is locked. It will return (nil, nil) if there is no lock on key, and (nil, err)
