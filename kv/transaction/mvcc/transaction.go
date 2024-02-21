@@ -2,9 +2,9 @@ package mvcc
 
 import (
 	"encoding/binary"
-
 	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/kv/util/codec"
+	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
 	"github.com/pingcap-incubator/tinykv/scheduler/pkg/tsoutil"
 )
@@ -20,6 +20,8 @@ func (ke *KeyError) Error() string {
 
 // MvccTxn groups together writes as part of a single transaction. It also provides an abstraction over low-level
 // storage, lowering the concepts of timestamps, writes, and locks into plain keys and values.
+// MvccTxn将写作为单个事务的一部分分组。它还提供了对底层的抽象
+// 存储，将时间戳、写入和锁的概念简化为普通的键和值。
 type MvccTxn struct {
 	StartTS uint64
 	Reader  storage.StorageReader
@@ -53,6 +55,12 @@ func (txn *MvccTxn) GetLock(key []byte) (*Lock, error) {
 // PutLock adds a key/lock to this transaction.
 func (txn *MvccTxn) PutLock(key []byte, lock *Lock) {
 	// Your Code Here (4A).
+	txn.writes = append(txn.Writes(), storage.Modify{storage.Put{
+		Key:   key,
+		Value: lock.ToBytes(),
+		Cf:    engine_util.CfLock,
+	}})
+
 }
 
 // DeleteLock adds a delete lock to this transaction.
