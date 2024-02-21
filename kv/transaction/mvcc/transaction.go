@@ -54,7 +54,31 @@ func (txn *MvccTxn) PutWrite(key []byte, ts uint64, write *Write) {
 // if an error occurs during lookup.
 func (txn *MvccTxn) GetLock(key []byte) (*Lock, error) {
 	// Your Code Here (4A).
-	return nil, nil
+	cf, err := txn.Reader.GetCF(engine_util.CfLock, key)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(cf) == 0 {
+		return nil, nil
+	}
+
+	var index = 0
+	_, n := binary.Uvarint(cf[index:])
+	index += n
+	kind, n := binary.Uvarint(cf[index:])
+	index += n
+	ts, n := binary.Uvarint(cf[index:])
+	index += n
+	ttl, _ := binary.Uvarint(cf[index:])
+
+	l := &Lock{
+		Primary: []byte{cf[0]},
+		Ts:      ts,
+		Ttl:     ttl,
+		Kind:    WriteKind(kind),
+	}
+	return l, nil
 }
 
 // PutLock adds a key/lock to this transaction.
@@ -83,6 +107,11 @@ func (txn *MvccTxn) GetValue(key []byte) ([]byte, error) {
 // PutValue adds a key/value write to this transaction.
 func (txn *MvccTxn) PutValue(key []byte, value []byte) {
 	// Your Code Here (4A).
+	txn.writes = append(txn.writes, storage.Modify{storage.Put{
+		Key:   EncodeKey(key, txn.StartTS),
+		Value: value,
+		Cf:    engine_util.CfDefault,
+	}})
 }
 
 // DeleteValue removes a key/value pair in this transaction.
