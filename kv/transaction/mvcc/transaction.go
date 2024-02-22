@@ -2,6 +2,7 @@ package mvcc
 
 import (
 	"encoding/binary"
+	"fmt"
 	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/kv/util/codec"
 	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
@@ -68,10 +69,10 @@ func (txn *MvccTxn) GetLock(key []byte) (*Lock, error) {
 	index += n
 	kind, n := binary.Uvarint(cf[index:])
 	index += n
-	ts, n := binary.Uvarint(cf[index:])
-	index += n
-	ttl, _ := binary.Uvarint(cf[index:])
+	ts := binary.BigEndian.Uint64(cf[index:])
+	ttl := binary.BigEndian.Uint64(cf[index+8:])
 
+	fmt.Println(ttl)
 	l := &Lock{
 		Primary: []byte{cf[0]},
 		Ts:      ts,
