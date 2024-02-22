@@ -178,8 +178,39 @@ func (txn *MvccTxn) CurrentWrite(key []byte) (*Write, uint64, error) {
 // write's commit timestamp, or an error.
 func (txn *MvccTxn) MostRecentWrite(key []byte) (*Write, uint64, error) {
 	// Your Code Here (4A).
+	var endTs uint64
+	write := &Write{
+		StartTS: 0,
+		Kind:    0,
+	}
+	iterator := txn.Reader.IterCF(engine_util.CfWrite)
+	for ; iterator.Valid(); iterator.Next() {
+		encodeKey := iterator.Item().Key()
+		tmp := decodeTimestamp(encodeKey)
+		cf, err := txn.Reader.GetCF(engine_util.CfWrite, EncodeKey(key, tmp))
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(cf) == 0 {
+			return nil, 0, err
+		}
+		if tmp > endTs {
+			endTs = tmp
+			value, err := iterator.Item().Value()
+			if err != nil {
+				return nil, 0, err
+			}
+			write.StartTS = binary.BigEndian.Uint64(value[1:])
+			write.Kind = WriteKind(value[0])
+		}
 
-	return nil, 0, nil
+	}
+
+	if write.StartTS == 0 {
+		return nil, 0, nil
+	}
+
+	return write, endTs, nil
 }
 
 // EncodeKey encodes a user key and appends an encoded timestamp to a key. Keys and timestamps are encoded so that
