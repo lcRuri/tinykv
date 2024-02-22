@@ -2,7 +2,6 @@ package mvcc
 
 import (
 	"encoding/binary"
-	"fmt"
 	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/kv/util/codec"
 	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
@@ -71,8 +70,6 @@ func (txn *MvccTxn) GetLock(key []byte) (*Lock, error) {
 	index += n
 	ts := binary.BigEndian.Uint64(cf[index:])
 	ttl := binary.BigEndian.Uint64(cf[index+8:])
-
-	fmt.Println(ttl)
 	l := &Lock{
 		Primary: []byte{cf[0]},
 		Ts:      ts,
@@ -106,7 +103,26 @@ func (txn *MvccTxn) DeleteLock(key []byte) {
 // I.e., the most recent value committed before the start of this transaction.
 func (txn *MvccTxn) GetValue(key []byte) ([]byte, error) {
 	// Your Code Here (4A).
-	return nil, nil
+	iter := txn.Reader.IterCF(engine_util.CfWrite)
+	var transactionStartTs uint64
+	for iter.Seek(EncodeKey(key, txn.StartTS)); iter.Valid(); iter.Next() {
+		k := iter.Item().Key()
+
+		endTs := decodeTimestamp(k)
+		if endTs > txn.StartTS {
+			continue
+		}
+
+		value, err := iter.Item().Value()
+		if err != nil {
+			return nil, err
+		}
+		transactionStartTs = binary.BigEndian.Uint64(value[1:])
+		break
+	}
+
+	return txn.Reader.GetCF(engine_util.CfDefault, EncodeKey(key, transactionStartTs))
+
 }
 
 // PutValue adds a key/value write to this transaction.
@@ -132,13 +148,37 @@ func (txn *MvccTxn) DeleteValue(key []byte) {
 // write's commit timestamp, or an error.
 func (txn *MvccTxn) CurrentWrite(key []byte) (*Write, uint64, error) {
 	// Your Code Here (4A).
-	return nil, 0, nil
+	var endTs uint64
+	cf, err := txn.Reader.GetCF(engine_util.CfDefault, EncodeKey(key, txn.StartTS))
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(cf) == 0 {
+		return nil, 0, err
+	}
+	value := make([]byte, 0)
+	for i := txn.StartTS + 1; ; i++ {
+		value, err = txn.Reader.GetCF(engine_util.CfWrite, EncodeKey(key, i))
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(value) != 0 {
+			endTs = i
+			break
+		}
+	}
+
+	return &Write{
+		StartTS: txn.StartTS,
+		Kind:    WriteKind(value[0]),
+	}, endTs, nil
 }
 
 // MostRecentWrite finds the most recent write with the given key. It returns a Write from the DB and that
 // write's commit timestamp, or an error.
 func (txn *MvccTxn) MostRecentWrite(key []byte) (*Write, uint64, error) {
 	// Your Code Here (4A).
+
 	return nil, 0, nil
 }
 
