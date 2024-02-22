@@ -96,6 +96,10 @@ func (txn *MvccTxn) PutLock(key []byte, lock *Lock) {
 // DeleteLock adds a delete lock to this transaction.
 func (txn *MvccTxn) DeleteLock(key []byte) {
 	// Your Code Here (4A).
+	txn.writes = append(txn.writes, storage.Modify{storage.Delete{
+		Key: key,
+		Cf:  engine_util.CfLock,
+	}})
 }
 
 // GetValue finds the value for key, valid at the start timestamp of this transaction.
@@ -118,6 +122,10 @@ func (txn *MvccTxn) PutValue(key []byte, value []byte) {
 // DeleteValue removes a key/value pair in this transaction.
 func (txn *MvccTxn) DeleteValue(key []byte) {
 	// Your Code Here (4A).
+	txn.writes = append(txn.writes, storage.Modify{storage.Delete{
+		Key: EncodeKey(key, txn.StartTS),
+		Cf:  engine_util.CfDefault,
+	}})
 }
 
 // CurrentWrite searches for a write with this transaction's start timestamp. It returns a Write from the DB and that
