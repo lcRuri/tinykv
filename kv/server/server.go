@@ -2,6 +2,10 @@ package server
 
 import (
 	"context"
+	"encoding/binary"
+	"github.com/pingcap-incubator/tinykv/kv/transaction/mvcc"
+	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
+	"github.com/pkg/errors"
 
 	"github.com/pingcap-incubator/tinykv/kv/coprocessor"
 	"github.com/pingcap-incubator/tinykv/kv/storage"
@@ -34,6 +38,7 @@ func NewServer(storage storage.Storage) *Server {
 }
 
 // The below functions are Server's gRPC API (implements TinyKvServer).
+//下面的函数是服务器的gRPC API(实现TinyKvServer)
 
 // Raft commands (tinykv <-> tinykv)
 // Only used for RaftStorage, so trivially forward it.
@@ -50,7 +55,47 @@ func (server *Server) Snapshot(stream tinykvpb.TinyKv_SnapshotServer) error {
 // Transactional API.
 func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcpb.GetResponse, error) {
 	// Your Code Here (4B).
-	return nil, nil
+	keysToLatch := make([][]byte, 0)
+	keysToLatch = append(keysToLatch, req.Key)
+	acquireLatches := server.Latches.AcquireLatches(keysToLatch)
+	if acquireLatches != nil {
+		return &kvrpcpb.GetResponse{
+			RegionError: nil,
+			Error:       nil,
+			Value:       nil,
+			NotFound:    false,
+		}, errors.New("key is locked")
+	}
+
+	reader, err := server.storage.Reader(req.Context)
+	if err != nil {
+		return nil, err
+	}
+
+	var value []byte
+	iterator := reader.IterCF(engine_util.CfWrite)
+	iterator.Seek(req.Key)
+	value, err = iterator.Item().Value()
+	if err != nil {
+		return nil, err
+	}
+
+	ts := binary.BigEndian.Uint64(value[1:])
+	val, err := reader.GetCF(engine_util.CfDefault, mvcc.EncodeKey(req.Key, ts))
+	if err != nil {
+		return nil, err
+	}
+
+	resp := &kvrpcpb.GetResponse{
+		RegionError: nil,
+		Error:       nil,
+		Value:       val,
+		NotFound:    false,
+	}
+	if len(val) == 0 {
+		resp.NotFound = true
+	}
+	return resp, nil
 }
 
 func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest) (*kvrpcpb.PrewriteResponse, error) {

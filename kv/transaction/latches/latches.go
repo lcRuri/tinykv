@@ -26,6 +26,7 @@ type Latches struct {
 	// Mutex to guard latchMap. A thread must hold this mutex while it makes any change to latchMap.
 	latchGuard sync.Mutex
 	// An optional validation function, only used for testing.
+	// 可选的验证函数，仅用于测试。
 	Validation func(txn *mvcc.MvccTxn, keys [][]byte)
 }
 
