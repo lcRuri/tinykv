@@ -3,14 +3,12 @@ package server
 import (
 	"context"
 	"encoding/binary"
-	"github.com/pingcap-incubator/tinykv/kv/transaction/mvcc"
-	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
-	"github.com/pkg/errors"
-
 	"github.com/pingcap-incubator/tinykv/kv/coprocessor"
 	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/kv/storage/raft_storage"
 	"github.com/pingcap-incubator/tinykv/kv/transaction/latches"
+	"github.com/pingcap-incubator/tinykv/kv/transaction/mvcc"
+	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
 	coppb "github.com/pingcap-incubator/tinykv/proto/pkg/coprocessor"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/tinykvpb"
@@ -55,17 +53,17 @@ func (server *Server) Snapshot(stream tinykvpb.TinyKv_SnapshotServer) error {
 // Transactional API.
 func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcpb.GetResponse, error) {
 	// Your Code Here (4B).
-	keysToLatch := make([][]byte, 0)
-	keysToLatch = append(keysToLatch, req.Key)
-	acquireLatches := server.Latches.AcquireLatches(keysToLatch)
-	if acquireLatches != nil {
-		return &kvrpcpb.GetResponse{
-			RegionError: nil,
-			Error:       nil,
-			Value:       nil,
-			NotFound:    false,
-		}, errors.New("key is locked")
-	}
+	//keysToLatch := make([][]byte, 0)
+	//keysToLatch = append(keysToLatch, req.Key)
+	//acquireLatches := server.Latches.AcquireLatches(keysToLatch)
+	//if acquireLatches != nil {
+	//	return &kvrpcpb.GetResponse{
+	//		RegionError: nil,
+	//		Error:       nil,
+	//		Value:       nil,
+	//		NotFound:    false,
+	//	}, nil
+	//}
 
 	reader, err := server.storage.Reader(req.Context)
 	if err != nil {
@@ -78,6 +76,15 @@ func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcp
 	value, err = iterator.Item().Value()
 	if err != nil {
 		return nil, err
+	}
+
+	if len(value) == 0 {
+		return &kvrpcpb.GetResponse{
+			RegionError: nil,
+			Error:       nil,
+			Value:       nil,
+			NotFound:    true,
+		}, nil
 	}
 
 	ts := binary.BigEndian.Uint64(value[1:])
