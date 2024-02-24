@@ -139,6 +139,7 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 
 		switch mutation.Op {
 		case kvrpcpb.Op_Put:
+			//尝试从latch那边获取锁
 			waitGroup := server.Latches.AcquireLatches([][]byte{mutation.Key})
 			if waitGroup != nil {
 				return &kvrpcpb.PrewriteResponse{
@@ -157,6 +158,8 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 			if err != nil {
 				return nil, err
 			}
+
+			//看看是否有没有提交的 如果有 比较ts
 			iterator := reader.IterCF(engine_util.CfWrite)
 			iterator.Seek(mutation.Key)
 			if len(iterator.Item().Key()) != 0 {
@@ -166,6 +169,7 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 					return nil, err
 				}
 				startTs := binary.BigEndian.Uint64(value[1:])
+				//事务还没有结束 不允许修改
 				if timestamp > req.StartVersion {
 					return &kvrpcpb.PrewriteResponse{
 						Errors: []*kvrpcpb.KeyError{{
@@ -181,6 +185,7 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 				}
 			}
 
+			//进行修改
 			err = server.storage.Write(req.Context, []storage.Modify{{storage.Put{
 				Key:   mvcc.EncodeKey(mutation.Key, req.StartVersion),
 				Value: mutation.Value,
@@ -189,6 +194,8 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 			if err != nil {
 				return nil, err
 			}
+
+			//写入cflock
 			val := make([]byte, 18)
 			val[0] = 1
 			val[1] = 1
@@ -199,7 +206,15 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 				Value: val,
 				Cf:    engine_util.CfLock,
 			}}})
-
+		case kvrpcpb.Op_Del:
+			for _, mutation := range req.Mutations {
+				server.storage.Write(req.Context, []storage.Modify{{
+					&storage.Delete{
+						Key: mutation.Key,
+						Cf:  engine_util.CfDefault,
+					}},
+				})
+			}
 		}
 	}
 
