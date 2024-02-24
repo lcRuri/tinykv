@@ -135,11 +135,23 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 	// Your Code Here (4B).
 	//log.Infof("a")
 
-	keys := make([][]byte, 0)
 	for _, mutation := range req.Mutations {
-		keys = append(keys, mutation.Key)
+
 		switch mutation.Op {
 		case kvrpcpb.Op_Put:
+			waitGroup := server.Latches.AcquireLatches([][]byte{mutation.Key})
+			if waitGroup != nil {
+				return &kvrpcpb.PrewriteResponse{
+					RegionError: nil,
+					Errors: []*kvrpcpb.KeyError{&kvrpcpb.KeyError{
+						Locked:    nil,
+						Retryable: "",
+						Abort:     "",
+						Conflict:  nil,
+					},
+					},
+				}, nil
+			}
 			err := server.storage.Write(req.Context, []storage.Modify{{storage.Put{
 				Key:   mvcc.EncodeKey(mutation.Key, req.StartVersion),
 				Value: mutation.Value,
@@ -159,11 +171,6 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 				Cf:    engine_util.CfLock,
 			}}})
 		}
-	}
-
-	waitGroup := server.Latches.AcquireLatches(keys)
-	if waitGroup != nil {
-		return nil, nil
 	}
 
 	resp := &kvrpcpb.PrewriteResponse{
