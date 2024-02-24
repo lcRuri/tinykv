@@ -8,6 +8,7 @@ import (
 	"github.com/pingcap-incubator/tinykv/kv/storage/raft_storage"
 	"github.com/pingcap-incubator/tinykv/kv/transaction/latches"
 	"github.com/pingcap-incubator/tinykv/kv/transaction/mvcc"
+	"github.com/pingcap-incubator/tinykv/kv/util/codec"
 	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
 	coppb "github.com/pingcap-incubator/tinykv/proto/pkg/coprocessor"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
@@ -93,6 +94,29 @@ func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcp
 		return nil, err
 	}
 
+	iterator = reader.IterCF(engine_util.CfWrite)
+	for ; iterator.Valid(); iterator.Next() {
+		endTs := decodeTimestamp(iterator.Item().Key())
+		value, err = iterator.Item().Value()
+		if err != nil {
+			return nil, err
+		}
+		ts = binary.BigEndian.Uint64(value[1:])
+		if req.Version >= endTs {
+			val, err = reader.GetCF(engine_util.CfDefault, mvcc.EncodeKey(req.Key, ts))
+			break
+		}
+	}
+
+	if ts > req.Version {
+		return &kvrpcpb.GetResponse{
+			RegionError: nil,
+			Error:       nil,
+			Value:       nil,
+			NotFound:    true,
+		}, nil
+	}
+
 	resp := &kvrpcpb.GetResponse{
 		RegionError: nil,
 		Error:       nil,
@@ -153,4 +177,12 @@ func (server *Server) Coprocessor(_ context.Context, req *coppb.Request) (*coppb
 		return server.copHandler.HandleCopAnalyzeRequest(reader, req), nil
 	}
 	return nil, nil
+}
+
+func decodeTimestamp(key []byte) uint64 {
+	left, _, err := codec.DecodeBytes(key)
+	if err != nil {
+		panic(err)
+	}
+	return ^binary.BigEndian.Uint64(left)
 }
