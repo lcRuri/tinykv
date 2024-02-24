@@ -54,52 +54,54 @@ func (server *Server) Snapshot(stream tinykvpb.TinyKv_SnapshotServer) error {
 // Transactional API.
 func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcpb.GetResponse, error) {
 	// Your Code Here (4B).
-	//keysToLatch := make([][]byte, 0)
-	//keysToLatch = append(keysToLatch, req.Key)
-	//acquireLatches := server.Latches.AcquireLatches(keysToLatch)
-	//if acquireLatches != nil {
-	//	return &kvrpcpb.GetResponse{
-	//		RegionError: nil,
-	//		Error:       nil,
-	//		Value:       nil,
-	//		NotFound:    false,
-	//	}, nil
-	//}
-
 	reader, err := server.storage.Reader(req.Context)
 	if err != nil {
 		return nil, err
 	}
 
-	var value []byte
-	iterator := reader.IterCF(engine_util.CfWrite)
-	iterator.Seek(req.Key)
-	value, err = iterator.Item().Value()
+	lockBytes, err := reader.GetCF(engine_util.CfLock, req.Key)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(value) == 0 {
+	lockVersion := binary.BigEndian.Uint64(lockBytes[2:])
+	if req.Version > lockVersion {
 		return &kvrpcpb.GetResponse{
 			RegionError: nil,
-			Error:       nil,
-			Value:       nil,
-			NotFound:    true,
+			Error: &kvrpcpb.KeyError{
+				Locked: &kvrpcpb.LockInfo{
+					PrimaryLock: req.Key,
+					LockVersion: lockVersion,
+					Key:         req.Key,
+					LockTtl:     0,
+				},
+				Retryable: "",
+				Abort:     "",
+				Conflict:  nil,
+			},
+			Value:    nil,
+			NotFound: false,
 		}, nil
 	}
 
-	ts := binary.BigEndian.Uint64(value[1:])
-	val, err := reader.GetCF(engine_util.CfDefault, mvcc.EncodeKey(req.Key, ts))
-	if err != nil {
-		return nil, err
-	}
-
-	iterator = reader.IterCF(engine_util.CfWrite)
+	var value []byte
+	var ts uint64
+	var val []byte
+	iterator := reader.IterCF(engine_util.CfWrite)
 	for ; iterator.Valid(); iterator.Next() {
 		endTs := decodeTimestamp(iterator.Item().Key())
 		value, err = iterator.Item().Value()
 		if err != nil {
 			return nil, err
+		}
+
+		if len(value) == 0 {
+			return &kvrpcpb.GetResponse{
+				RegionError: nil,
+				Error:       nil,
+				Value:       nil,
+				NotFound:    true,
+			}, nil
 		}
 		ts = binary.BigEndian.Uint64(value[1:])
 		if req.Version >= endTs {
