@@ -268,6 +268,7 @@ func TestSinglePrewrite4B(t *testing.T) {
 		{cf: engine_util.CfDefault, key: []byte{3}, value: []byte{42}},
 		{cf: engine_util.CfLock, key: []byte{3}, value: []byte{1, 1, 0, 0, 0, 0, 0, 0, 0, builder.ts(), 0, 0, 0, 0, 0, 0, 3, 232}},
 	})
+
 }
 
 // TestPrewriteLocked4B tests that two prewrites to the same key causes a lock error.
