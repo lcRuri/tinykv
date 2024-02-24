@@ -143,7 +143,7 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 			if waitGroup != nil {
 				return &kvrpcpb.PrewriteResponse{
 					RegionError: nil,
-					Errors: []*kvrpcpb.KeyError{&kvrpcpb.KeyError{
+					Errors: []*kvrpcpb.KeyError{{
 						Locked:    nil,
 						Retryable: "",
 						Abort:     "",
@@ -152,7 +152,36 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 					},
 				}, nil
 			}
-			err := server.storage.Write(req.Context, []storage.Modify{{storage.Put{
+
+			reader, err := server.storage.Reader(req.Context)
+			if err != nil {
+				return nil, err
+			}
+			iterator := reader.IterCF(engine_util.CfWrite)
+			iterator.Seek(mutation.Key)
+			if len(iterator.Item().Key()) != 0 {
+				timestamp := decodeTimestamp(iterator.Item().Key())
+				value, err := iterator.Item().Value()
+				if err != nil {
+					return nil, err
+				}
+				startTs := binary.BigEndian.Uint64(value[1:])
+				if timestamp > req.StartVersion {
+					return &kvrpcpb.PrewriteResponse{
+						Errors: []*kvrpcpb.KeyError{{
+							Conflict: &kvrpcpb.WriteConflict{
+								StartTs:    startTs,
+								ConflictTs: timestamp,
+								Key:        mutation.Key,
+								Primary:    nil,
+							},
+						},
+						},
+					}, nil
+				}
+			}
+
+			err = server.storage.Write(req.Context, []storage.Modify{{storage.Put{
 				Key:   mvcc.EncodeKey(mutation.Key, req.StartVersion),
 				Value: mutation.Value,
 				Cf:    engine_util.CfDefault,
