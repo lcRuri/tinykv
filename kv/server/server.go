@@ -133,7 +133,45 @@ func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcp
 
 func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest) (*kvrpcpb.PrewriteResponse, error) {
 	// Your Code Here (4B).
-	return nil, nil
+	//log.Infof("a")
+
+	keys := make([][]byte, 0)
+	for _, mutation := range req.Mutations {
+		keys = append(keys, mutation.Key)
+		switch mutation.Op {
+		case kvrpcpb.Op_Put:
+			err := server.storage.Write(req.Context, []storage.Modify{{storage.Put{
+				Key:   mvcc.EncodeKey(mutation.Key, req.StartVersion),
+				Value: mutation.Value,
+				Cf:    engine_util.CfDefault,
+			}}})
+			if err != nil {
+				return nil, err
+			}
+			val := make([]byte, 18)
+			val[0] = 1
+			val[1] = 1
+			binary.BigEndian.PutUint64(val[2:], req.StartVersion)
+			binary.BigEndian.PutUint64(val[10:], req.LockTtl)
+			server.storage.Write(req.Context, []storage.Modify{{storage.Put{
+				Key:   mutation.Key,
+				Value: val,
+				Cf:    engine_util.CfLock,
+			}}})
+		}
+	}
+
+	waitGroup := server.Latches.AcquireLatches(keys)
+	if waitGroup != nil {
+		return nil, nil
+	}
+
+	resp := &kvrpcpb.PrewriteResponse{
+		RegionError: nil,
+		Errors:      nil,
+	}
+
+	return resp, nil
 }
 
 func (server *Server) KvCommit(_ context.Context, req *kvrpcpb.CommitRequest) (*kvrpcpb.CommitResponse, error) {
