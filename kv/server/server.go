@@ -10,6 +10,7 @@ import (
 	"github.com/pingcap-incubator/tinykv/kv/transaction/mvcc"
 	"github.com/pingcap-incubator/tinykv/kv/util/codec"
 	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
+	"github.com/pingcap-incubator/tinykv/log"
 	coppb "github.com/pingcap-incubator/tinykv/proto/pkg/coprocessor"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/tinykvpb"
@@ -233,7 +234,28 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 
 func (server *Server) KvCommit(_ context.Context, req *kvrpcpb.CommitRequest) (*kvrpcpb.CommitResponse, error) {
 	// Your Code Here (4B).
-	return nil, nil
+	log.Infof("a")
+
+	for _, key := range req.Keys {
+		val := make([]byte, 9)
+		val[0] = 1
+		binary.BigEndian.PutUint64(val[1:], req.StartVersion)
+		server.storage.Write(req.Context, []storage.Modify{{storage.Put{
+			Key:   mvcc.EncodeKey(key, req.CommitVersion),
+			Value: val,
+			Cf:    engine_util.CfWrite,
+		}}})
+		server.storage.Write(req.Context, []storage.Modify{{storage.Delete{
+			Key: key,
+			Cf:  engine_util.CfLock,
+		}}})
+	}
+
+	resp := &kvrpcpb.CommitResponse{
+		RegionError: nil,
+		Error:       nil,
+	}
+	return resp, nil
 }
 
 func (server *Server) KvScan(_ context.Context, req *kvrpcpb.ScanRequest) (*kvrpcpb.ScanResponse, error) {
