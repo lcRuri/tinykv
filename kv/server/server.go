@@ -64,24 +64,26 @@ func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcp
 		return nil, err
 	}
 
-	lockVersion := binary.BigEndian.Uint64(lockBytes[2:])
-	if req.Version > lockVersion {
-		return &kvrpcpb.GetResponse{
-			RegionError: nil,
-			Error: &kvrpcpb.KeyError{
-				Locked: &kvrpcpb.LockInfo{
-					PrimaryLock: req.Key,
-					LockVersion: lockVersion,
-					Key:         req.Key,
-					LockTtl:     0,
+	if len(lockBytes) != 0 {
+		lockVersion := binary.BigEndian.Uint64(lockBytes[2:])
+		if req.Version > lockVersion {
+			return &kvrpcpb.GetResponse{
+				RegionError: nil,
+				Error: &kvrpcpb.KeyError{
+					Locked: &kvrpcpb.LockInfo{
+						PrimaryLock: req.Key,
+						LockVersion: lockVersion,
+						Key:         req.Key,
+						LockTtl:     0,
+					},
+					Retryable: "",
+					Abort:     "",
+					Conflict:  nil,
 				},
-				Retryable: "",
-				Abort:     "",
-				Conflict:  nil,
-			},
-			Value:    nil,
-			NotFound: false,
-		}, nil
+				Value:    nil,
+				NotFound: false,
+			}, nil
+		}
 	}
 
 	var value []byte
@@ -134,25 +136,28 @@ func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcp
 func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest) (*kvrpcpb.PrewriteResponse, error) {
 	// Your Code Here (4B).
 	//log.Infof("a")
-
+	keys := make([][]byte, 0)
+	for _, mutation := range req.Mutations {
+		keys = append(keys, mutation.Key)
+	}
+	waitGroup := server.Latches.AcquireLatches(keys)
+	if waitGroup != nil {
+		return &kvrpcpb.PrewriteResponse{
+			RegionError: nil,
+			Errors: []*kvrpcpb.KeyError{{
+				Locked:    nil,
+				Retryable: "",
+				Abort:     "",
+				Conflict:  nil,
+			},
+			},
+		}, nil
+	}
 	for _, mutation := range req.Mutations {
 
 		switch mutation.Op {
 		case kvrpcpb.Op_Put:
 			//尝试从latch那边获取锁
-			waitGroup := server.Latches.AcquireLatches([][]byte{mutation.Key})
-			if waitGroup != nil {
-				return &kvrpcpb.PrewriteResponse{
-					RegionError: nil,
-					Errors: []*kvrpcpb.KeyError{{
-						Locked:    nil,
-						Retryable: "",
-						Abort:     "",
-						Conflict:  nil,
-					},
-					},
-				}, nil
-			}
 
 			reader, err := server.storage.Reader(req.Context)
 			if err != nil {
