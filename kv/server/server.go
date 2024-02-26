@@ -77,7 +77,14 @@ func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcp
 		}
 	}
 
+	//锁记录的是可以看到的ts key 被事务锁住 getlcok
 	if lock != nil && req.Version >= lock.Ts {
+		resp.Error = &kvrpcpb.KeyError{Locked: &kvrpcpb.LockInfo{
+			PrimaryLock: lock.Primary,
+			LockVersion: lock.Ts,
+			Key:         req.Key,
+			LockTtl:     lock.Ttl,
+		}}
 		return resp, nil
 	}
 
