@@ -69,6 +69,7 @@ func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcp
 	defer reader.Close()
 
 	txn := mvcc.NewMvccTxn(reader, req.Version)
+	//获取这个key对呀事务的锁
 	lock, err := txn.GetLock(req.Key)
 	if err != nil {
 		if regionError, ok := err.(*raft_storage.RegionError); ok {
@@ -88,6 +89,7 @@ func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcp
 		return resp, nil
 	}
 
+	//读取值
 	value, err := txn.GetValue(req.Key)
 	if err != nil {
 		if regionErr, ok := err.(*raft_storage.RegionError); ok {
@@ -107,14 +109,57 @@ func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcp
 
 func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest) (*kvrpcpb.PrewriteResponse, error) {
 	// Your Code Here (4B).
-	return nil, nil
+	resp := &kvrpcpb.PrewriteResponse{}
+	reader, err := server.storage.Reader(req.Context)
+	if err != nil {
+		if regionError, ok := err.(*raft_storage.RegionError); ok {
+			resp.RegionError = regionError.RequestErr
+			return resp, err
+		}
+	}
+	defer reader.Close()
+	//创建事务
+	txn := mvcc.NewMvccTxn(reader, req.StartVersion)
+
+	//遍历操作进行判断执行
+	for _, mutation := range req.Mutations {
+
+		switch mutation.Op {
+		case kvrpcpb.Op_Put:
+			txn.PutValue(mutation.Key, mutation.Value)
+			txn.PutLock(mutation.Key, &mvcc.Lock{
+				Primary: req.PrimaryLock,
+				Ts:      req.StartVersion,
+				Ttl:     req.LockTtl,
+				Kind:    mvcc.WriteKindPut,
+			})
+		case kvrpcpb.Op_Del:
+			txn.DeleteValue(mutation.Key)
+			txn.DeleteLock(mutation.Key)
+		case kvrpcpb.Op_Rollback:
+		}
+	}
+
+	err = server.storage.Write(req.Context, txn.Writes())
+	if err != nil {
+		if regionError, ok := err.(*raft_storage.RegionError); ok {
+			resp.RegionError = regionError.RequestErr
+			return resp, err
+		}
+	}
+
+	return resp, nil
 }
 
 func (server *Server) KvCommit(_ context.Context, req *kvrpcpb.CommitRequest) (*kvrpcpb.CommitResponse, error) {
 	// Your Code Here (4B).
+	resp := &kvrpcpb.CommitResponse{}
 	reader, err := server.storage.Reader(req.Context)
 	if err != nil {
-		return nil, err
+		if regionError, ok := err.(*raft_storage.RegionError); ok {
+			resp.RegionError = regionError.RequestErr
+			return resp, err
+		}
 	}
 	defer reader.Close()
 
