@@ -10,7 +10,6 @@ import (
 	"github.com/pingcap-incubator/tinykv/kv/transaction/mvcc"
 	"github.com/pingcap-incubator/tinykv/kv/util/codec"
 	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
-	"github.com/pingcap-incubator/tinykv/log"
 	coppb "github.com/pingcap-incubator/tinykv/proto/pkg/coprocessor"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/tinykvpb"
@@ -234,9 +233,78 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 
 func (server *Server) KvCommit(_ context.Context, req *kvrpcpb.CommitRequest) (*kvrpcpb.CommitResponse, error) {
 	// Your Code Here (4B).
-	log.Infof("a")
+	reader, err := server.storage.Reader(req.Context)
+	if err != nil {
+		return nil, err
+	}
+
+	//check cfwrite
+	for _, key := range req.Keys {
+		iterator := reader.IterCF(engine_util.CfWrite)
+		iterator.Seek(key)
+		k := iterator.Item().Key()
+		if len(k) == 0 {
+			continue
+		}
+
+		value, err := iterator.Item().Value()
+		if err != nil {
+			return nil, err
+		}
+
+		if value[0] == 3 {
+			return &kvrpcpb.CommitResponse{
+				RegionError: nil,
+				Error: &kvrpcpb.KeyError{
+					Locked:    nil,
+					Retryable: "",
+					Abort:     "",
+					Conflict:  nil,
+				},
+			}, nil
+		}
+	}
 
 	for _, key := range req.Keys {
+		cf, err := reader.GetCF(engine_util.CfLock, key)
+		if err != nil {
+			return nil, err
+		}
+		if len(cf) == 0 {
+			continue
+		}
+
+		startTs := binary.BigEndian.Uint64(cf[2:])
+		if startTs != req.StartVersion {
+			return &kvrpcpb.CommitResponse{
+				RegionError: nil,
+				Error: &kvrpcpb.KeyError{
+					Locked:    nil,
+					Retryable: "error",
+					Abort:     "",
+					Conflict:  nil,
+				},
+			}, nil
+		}
+	}
+
+	for _, key := range req.Keys {
+		iterator := reader.IterCF(engine_util.CfWrite)
+		iterator.Seek(key)
+		k := iterator.Item().Key()
+		if len(k) == 0 {
+			continue
+		}
+		endTs := decodeTimestamp(iterator.Item().Key())
+		value, err := iterator.Item().Value()
+		if err != nil {
+			return nil, err
+		}
+		startTs := binary.BigEndian.Uint64(value[1:])
+		if startTs == req.StartVersion && endTs == req.CommitVersion {
+			continue
+		}
+
 		val := make([]byte, 9)
 		val[0] = 1
 		binary.BigEndian.PutUint64(val[1:], req.StartVersion)
