@@ -7,6 +7,7 @@ import (
 	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/kv/storage/raft_storage"
 	"github.com/pingcap-incubator/tinykv/kv/transaction/latches"
+	"github.com/pingcap-incubator/tinykv/kv/transaction/mvcc"
 	"github.com/pingcap-incubator/tinykv/kv/util/codec"
 	coppb "github.com/pingcap-incubator/tinykv/proto/pkg/coprocessor"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
@@ -52,16 +53,54 @@ func (server *Server) Snapshot(stream tinykvpb.TinyKv_SnapshotServer) error {
 // Transactional API.
 func (server *Server) KvGet(_ context.Context, req *kvrpcpb.GetRequest) (*kvrpcpb.GetResponse, error) {
 	// Your Code Here (4B).
+	resp := &kvrpcpb.GetResponse{
+		RegionError: nil,
+		Error:       nil,
+		Value:       nil,
+		NotFound:    false,
+	}
 	reader, err := server.storage.Reader(req.Context)
 	if err != nil {
-		return nil, err
+		if regionError, ok := err.(*raft_storage.RegionError); ok {
+			resp.RegionError = regionError.RequestErr
+			return resp, err
+		}
+	}
+	defer reader.Close()
+
+	txn := mvcc.NewMvccTxn(reader, req.Version)
+	lock, err := txn.GetLock(req.Key)
+	if err != nil {
+		if regionError, ok := err.(*raft_storage.RegionError); ok {
+			resp.RegionError = regionError.RequestErr
+			return resp, err
+		}
 	}
 
+	if lock != nil && req.Version >= lock.Ts {
+		return resp, nil
+	}
+
+	value, err := txn.GetValue(req.Key)
+	if err != nil {
+		if regionErr, ok := err.(*raft_storage.RegionError); ok {
+			resp.RegionError = regionErr.RequestErr
+			return resp, nil
+		}
+		return nil, err
+	}
+	if len(value) == 0 {
+		resp.NotFound = true
+	}
+
+	resp.Value = value
+
+	return resp, nil
 }
 
 func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest) (*kvrpcpb.PrewriteResponse, error) {
 	// Your Code Here (4B).
-
+	return nil, nil
 }
 
 func (server *Server) KvCommit(_ context.Context, req *kvrpcpb.CommitRequest) (*kvrpcpb.CommitResponse, error) {
@@ -70,6 +109,9 @@ func (server *Server) KvCommit(_ context.Context, req *kvrpcpb.CommitRequest) (*
 	if err != nil {
 		return nil, err
 	}
+	defer reader.Close()
+
+	return nil, err
 
 }
 
