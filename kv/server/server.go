@@ -123,21 +123,45 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 
 	//遍历操作进行判断执行
 	for _, mutation := range req.Mutations {
+		lock, err := txn.GetLock(mutation.Key)
+		if err != nil {
+			if regionError, ok := err.(*raft_storage.RegionError); ok {
+				resp.RegionError = regionError.RequestErr
+				return resp, err
+			}
+		}
 
+		if lock != nil && lock.Ts < req.StartVersion {
+			return &kvrpcpb.PrewriteResponse{
+				Errors: []*kvrpcpb.KeyError{{
+					Conflict: &kvrpcpb.WriteConflict{
+						StartTs:    req.StartVersion,
+						ConflictTs: lock.Ts,
+						Key:        mutation.Key,
+						Primary:    lock.Primary,
+					},
+				},
+				},
+			}, nil
+		}
+
+		var kind mvcc.WriteKind
 		switch mutation.Op {
 		case kvrpcpb.Op_Put:
+			kind = mvcc.WriteKindPut
 			txn.PutValue(mutation.Key, mutation.Value)
-			txn.PutLock(mutation.Key, &mvcc.Lock{
-				Primary: req.PrimaryLock,
-				Ts:      req.StartVersion,
-				Ttl:     req.LockTtl,
-				Kind:    mvcc.WriteKindPut,
-			})
 		case kvrpcpb.Op_Del:
+			kind = mvcc.WriteKindDelete
 			txn.DeleteValue(mutation.Key)
-			txn.DeleteLock(mutation.Key)
 		case kvrpcpb.Op_Rollback:
 		}
+
+		txn.PutLock(mutation.Key, &mvcc.Lock{
+			Primary: req.PrimaryLock,
+			Ts:      req.StartVersion,
+			Ttl:     req.LockTtl,
+			Kind:    kind,
+		})
 	}
 
 	err = server.storage.Write(req.Context, txn.Writes())
