@@ -216,7 +216,69 @@ func (server *Server) KvCommit(_ context.Context, req *kvrpcpb.CommitRequest) (*
 	}
 	defer reader.Close()
 
-	return nil, err
+	txn := mvcc.NewMvccTxn(reader, req.StartVersion)
+	server.Latches.WaitForLatches(req.Keys)
+	defer server.Latches.ReleaseLatches(req.Keys)
+	for _, key := range req.Keys {
+		write, _, err := txn.MostRecentWrite(key)
+		if err != nil {
+			if regionError, ok := err.(*raft_storage.RegionError); ok {
+				resp.RegionError = regionError.RequestErr
+				return resp, err
+			}
+		}
+
+		if write != nil {
+			//存在write并且write的值意味着rollback
+			if write.Kind == mvcc.WriteKindRollback {
+				resp.Error = &kvrpcpb.KeyError{Retryable: "false"}
+				return resp, nil
+			}
+
+			if write.StartTS == req.StartVersion {
+				continue
+			}
+
+		}
+
+		lock, err := txn.GetLock(key)
+		if err != nil {
+			if regionError, ok := err.(*raft_storage.RegionError); ok {
+				resp.RegionError = regionError.RequestErr
+				return resp, err
+			}
+		}
+
+		//缺失了cflock
+		if lock == nil {
+			continue
+		}
+
+		if lock != nil {
+			if lock.Kind == mvcc.WriteKindRollback {
+				resp.Error = &kvrpcpb.KeyError{Retryable: "true"}
+				return resp, nil
+			}
+		}
+
+		txn.PutWrite(key, req.CommitVersion, &mvcc.Write{
+			StartTS: req.StartVersion,
+			Kind:    mvcc.WriteKindPut,
+		})
+
+		txn.DeleteLock(key)
+
+	}
+
+	err = server.storage.Write(req.Context, txn.Writes())
+	if err != nil {
+		if regionError, ok := err.(*raft_storage.RegionError); ok {
+			resp.RegionError = regionError.RequestErr
+			return resp, err
+		}
+	}
+
+	return resp, nil
 
 }
 
