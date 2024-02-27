@@ -64,17 +64,16 @@ func (txn *MvccTxn) GetLock(key []byte) (*Lock, error) {
 	}
 
 	var index = 0
-	_, n := binary.Uvarint(cf[index:])
-	index += n
-	kind, n := binary.Uvarint(cf[index:])
-	index += n
-	ts := binary.BigEndian.Uint64(cf[index:])
-	ttl := binary.BigEndian.Uint64(cf[index+8:])
+	index = len(cf) - 17
+	primary := cf[:index]
+	kind := WriteKind(cf[index])
+	ts := binary.BigEndian.Uint64(cf[index+1:])
+	ttl := binary.BigEndian.Uint64(cf[index+9:])
 	l := &Lock{
-		Primary: []byte{cf[0]},
+		Primary: primary,
 		Ts:      ts,
 		Ttl:     ttl,
-		Kind:    WriteKind(kind),
+		Kind:    kind,
 	}
 	return l, nil
 }
