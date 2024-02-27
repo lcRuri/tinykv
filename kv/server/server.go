@@ -249,7 +249,7 @@ func (server *Server) KvCommit(_ context.Context, req *kvrpcpb.CommitRequest) (*
 			}
 		}
 
-		//缺失了cflock
+		//缺失了cflock lock相当于二阶段提交的第一阶段的凭证 没有的说明第一阶段没锁住
 		if lock == nil {
 			continue
 		}
