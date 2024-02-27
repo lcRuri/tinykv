@@ -121,8 +121,31 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 	//创建事务
 	txn := mvcc.NewMvccTxn(reader, req.StartVersion)
 
+	var keyErrors []*kvrpcpb.KeyError
 	//遍历操作进行判断执行
 	for _, mutation := range req.Mutations {
+		//here
+		write, ts, err := txn.MostRecentWrite(mutation.Key)
+		if err != nil {
+			if regionError, ok := err.(*raft_storage.RegionError); ok {
+				resp.RegionError = regionError.RequestErr
+				return resp, err
+			}
+		}
+
+		//存在事务 同时请求的时间在这个事务中间
+		if write != nil && req.StartVersion < ts {
+			keyErrors = append(keyErrors, &kvrpcpb.KeyError{
+				Conflict: &kvrpcpb.WriteConflict{
+					StartTs:    req.StartVersion,
+					ConflictTs: ts,
+					Key:        mutation.Key,
+					Primary:    req.PrimaryLock,
+				},
+			})
+			continue
+		}
+
 		lock, err := txn.GetLock(mutation.Key)
 		if err != nil {
 			if regionError, ok := err.(*raft_storage.RegionError); ok {
@@ -131,7 +154,8 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 			}
 		}
 
-		if lock != nil && lock.Ts < req.StartVersion {
+		//here !=
+		if lock != nil && lock.Ts != req.StartVersion {
 			return &kvrpcpb.PrewriteResponse{
 				Errors: []*kvrpcpb.KeyError{{
 					Conflict: &kvrpcpb.WriteConflict{
@@ -162,6 +186,11 @@ func (server *Server) KvPrewrite(_ context.Context, req *kvrpcpb.PrewriteRequest
 			Ttl:     req.LockTtl,
 			Kind:    kind,
 		})
+	}
+
+	if len(keyErrors) > 0 {
+		resp.Errors = keyErrors
+		return resp, nil
 	}
 
 	err = server.storage.Write(req.Context, txn.Writes())

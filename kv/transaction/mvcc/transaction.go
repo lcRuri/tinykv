@@ -185,6 +185,7 @@ func (txn *MvccTxn) MostRecentWrite(key []byte) (*Write, uint64, error) {
 		Kind:    0,
 	}
 	iterator := txn.Reader.IterCF(engine_util.CfWrite)
+	defer iterator.Close()
 	for ; iterator.Valid(); iterator.Next() {
 		encodeKey := iterator.Item().Key()
 		tmp := decodeTimestamp(encodeKey)
