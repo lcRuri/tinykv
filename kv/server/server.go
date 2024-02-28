@@ -9,7 +9,6 @@ import (
 	"github.com/pingcap-incubator/tinykv/kv/transaction/latches"
 	"github.com/pingcap-incubator/tinykv/kv/transaction/mvcc"
 	"github.com/pingcap-incubator/tinykv/kv/util/codec"
-	"github.com/pingcap-incubator/tinykv/log"
 	coppb "github.com/pingcap-incubator/tinykv/proto/pkg/coprocessor"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/tinykvpb"
@@ -290,7 +289,6 @@ func (server *Server) KvScan(_ context.Context, req *kvrpcpb.ScanRequest) (*kvrp
 
 func (server *Server) KvCheckTxnStatus(_ context.Context, req *kvrpcpb.CheckTxnStatusRequest) (*kvrpcpb.CheckTxnStatusResponse, error) {
 	// Your Code Here (4C).
-	log.Infof("a")
 	resp := &kvrpcpb.CheckTxnStatusResponse{}
 	reader, err := server.storage.Reader(req.Context)
 	if err != nil {
@@ -302,6 +300,7 @@ func (server *Server) KvCheckTxnStatus(_ context.Context, req *kvrpcpb.CheckTxnS
 	defer reader.Close()
 
 	txn := mvcc.NewMvccTxn(reader, req.LockTs)
+	//获取锁
 	lock, err := txn.GetLock(req.PrimaryKey)
 	if err != nil {
 		if regionError, ok := err.(*raft_storage.RegionError); ok {
@@ -310,7 +309,43 @@ func (server *Server) KvCheckTxnStatus(_ context.Context, req *kvrpcpb.CheckTxnS
 		}
 	}
 
+	//没有lock 可能是已经提交了 也有可能是回滚了
+	if lock == nil {
+		write, endTs, err := txn.CurrentWrite(req.PrimaryKey)
+		if err != nil {
+			if regionError, ok := err.(*raft_storage.RegionError); ok {
+				resp.RegionError = regionError.RequestErr
+				return resp, err
+			}
+		}
+
+		//没有write 说明是回滚了 写入一条write why
+		if write == nil {
+			resp.Action = kvrpcpb.Action_LockNotExistRollback
+			txn.PutWrite(req.PrimaryKey, req.LockTs, &mvcc.Write{
+				StartTS: req.LockTs,
+				Kind:    mvcc.WriteKindRollback,
+			})
+		} else {
+			//存在write kind不为rollback 说明已经提交了 返回提交时间
+			if write.Kind != mvcc.WriteKindRollback {
+				resp.CommitVersion = endTs
+			}
+		}
+		err = server.storage.Write(req.Context, txn.Writes())
+		if err != nil {
+			if regionError, ok := err.(*raft_storage.RegionError); ok {
+				resp.RegionError = regionError.RequestErr
+				return resp, err
+			}
+		}
+
+		return resp, nil
+	}
+
+	//锁超时
 	if mvcc.PhysicalTime(lock.Ts)+lock.Ttl <= mvcc.PhysicalTime(req.CurrentTs) {
+		//删除锁 删除值 写入一条write
 		txn.DeleteLock(req.PrimaryKey)
 		txn.DeleteValue(req.PrimaryKey)
 		//why is lockTs
