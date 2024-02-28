@@ -1,6 +1,7 @@
 package mvcc
 
 import (
+	"bytes"
 	"encoding/binary"
 	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/kv/util/codec"
@@ -148,30 +149,31 @@ func (txn *MvccTxn) DeleteValue(key []byte) {
 // write's commit timestamp, or an error.
 func (txn *MvccTxn) CurrentWrite(key []byte) (*Write, uint64, error) {
 	// Your Code Here (4A).
+	iterator := txn.Reader.IterCF(engine_util.CfWrite)
+	defer iterator.Close()
 	var endTs uint64
-	cf, err := txn.Reader.GetCF(engine_util.CfDefault, EncodeKey(key, txn.StartTS))
-	if err != nil {
-		return nil, 0, err
-	}
-	if len(cf) == 0 {
-		return nil, 0, err
-	}
 	value := make([]byte, 0)
-	for i := txn.StartTS + 1; ; i++ {
-		value, err = txn.Reader.GetCF(engine_util.CfWrite, EncodeKey(key, i))
-		if err != nil {
-			return nil, 0, err
-		}
-		if len(value) != 0 {
-			endTs = i
-			break
+	var err error
+	for iterator.Seek(EncodeKey(key, TsMax)); iterator.Valid(); iterator.Next() {
+		k := iterator.Item().Key()
+		decodeUserKey := DecodeUserKey(k)
+		if bytes.Compare(decodeUserKey, key) == 0 {
+			endTs = decodeTimestamp(k)
+			value, err = iterator.Item().Value()
+			if err != nil {
+				return nil, 0, err
+			}
+			startTs := binary.BigEndian.Uint64(value[1:])
+			if startTs == txn.StartTS {
+				return &Write{
+					StartTS: txn.StartTS,
+					Kind:    WriteKind(value[0]),
+				}, endTs, nil
+			}
 		}
 	}
 
-	return &Write{
-		StartTS: txn.StartTS,
-		Kind:    WriteKind(value[0]),
-	}, endTs, nil
+	return nil, 0, nil
 }
 
 // MostRecentWrite finds the most recent write with the given key. It returns a Write from the DB and that
