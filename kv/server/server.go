@@ -9,6 +9,7 @@ import (
 	"github.com/pingcap-incubator/tinykv/kv/transaction/latches"
 	"github.com/pingcap-incubator/tinykv/kv/transaction/mvcc"
 	"github.com/pingcap-incubator/tinykv/kv/util/codec"
+	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
 	coppb "github.com/pingcap-incubator/tinykv/proto/pkg/coprocessor"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/tinykvpb"
@@ -444,7 +445,56 @@ func (server *Server) KvBatchRollback(_ context.Context, req *kvrpcpb.BatchRollb
 
 func (server *Server) KvResolveLock(_ context.Context, req *kvrpcpb.ResolveLockRequest) (*kvrpcpb.ResolveLockResponse, error) {
 	// Your Code Here (4C).
-	return nil, nil
+	resp := &kvrpcpb.ResolveLockResponse{}
+	reader, err := server.storage.Reader(req.Context)
+	if err != nil {
+		if regionError, ok := err.(*raft_storage.RegionError); ok {
+			resp.RegionError = regionError.RequestErr
+			return resp, err
+		}
+	}
+	defer reader.Close()
+
+	txn := mvcc.NewMvccTxn(reader, req.StartVersion)
+	iterator := txn.Reader.IterCF(engine_util.CfLock)
+	defer iterator.Close()
+	for ; iterator.Valid(); iterator.Next() {
+		key := iterator.Item().Key()
+
+		lock, err := txn.GetLock(key)
+		if err != nil {
+			return nil, err
+		}
+		if lock == nil {
+			continue
+		}
+
+		if lock.Ts == req.StartVersion && req.CommitVersion != 0 {
+			txn.PutWrite(key, req.CommitVersion, &mvcc.Write{
+				StartTS: req.StartVersion,
+				Kind:    mvcc.WriteKindPut,
+			})
+			txn.DeleteLock(key)
+		} else if lock.Ts == req.StartVersion && req.CommitVersion == 0 {
+			txn.PutWrite(key, req.StartVersion, &mvcc.Write{
+				StartTS: req.StartVersion,
+				Kind:    mvcc.WriteKindRollback,
+			})
+			txn.DeleteLock(key)
+			txn.DeleteValue(key)
+
+		}
+	}
+
+	err = server.storage.Write(req.Context, txn.Writes())
+	if err != nil {
+		if regionError, ok := err.(*raft_storage.RegionError); ok {
+			resp.RegionError = regionError.RequestErr
+			return resp, err
+		}
+	}
+
+	return resp, nil
 }
 
 // SQL push down commands.
