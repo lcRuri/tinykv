@@ -458,6 +458,7 @@ func (server *Server) KvResolveLock(_ context.Context, req *kvrpcpb.ResolveLockR
 	txn := mvcc.NewMvccTxn(reader, req.StartVersion)
 	iterator := txn.Reader.IterCF(engine_util.CfLock)
 	defer iterator.Close()
+	keys := make([][]byte, 0)
 	for ; iterator.Valid(); iterator.Next() {
 		key := iterator.Item().Key()
 
@@ -469,29 +470,43 @@ func (server *Server) KvResolveLock(_ context.Context, req *kvrpcpb.ResolveLockR
 			continue
 		}
 
-		if lock.Ts == req.StartVersion && req.CommitVersion != 0 {
-			txn.PutWrite(key, req.CommitVersion, &mvcc.Write{
-				StartTS: req.StartVersion,
-				Kind:    mvcc.WriteKindPut,
-			})
-			txn.DeleteLock(key)
-		} else if lock.Ts == req.StartVersion && req.CommitVersion == 0 {
-			txn.PutWrite(key, req.StartVersion, &mvcc.Write{
-				StartTS: req.StartVersion,
-				Kind:    mvcc.WriteKindRollback,
-			})
-			txn.DeleteLock(key)
-			txn.DeleteValue(key)
-
+		if lock.Ts == req.StartVersion {
+			keys = append(keys, key)
 		}
 	}
 
-	err = server.storage.Write(req.Context, txn.Writes())
-	if err != nil {
-		if regionError, ok := err.(*raft_storage.RegionError); ok {
-			resp.RegionError = regionError.RequestErr
-			return resp, err
+	if req.CommitVersion != 0 {
+		response, err := server.KvCommit(nil, &kvrpcpb.CommitRequest{
+			Context:       req.Context,
+			StartVersion:  req.StartVersion,
+			Keys:          keys,
+			CommitVersion: req.CommitVersion,
+		})
+
+		if err != nil {
+			if regionError, ok := err.(*raft_storage.RegionError); ok {
+				resp.RegionError = regionError.RequestErr
+				return resp, err
+			}
 		}
+		resp.Error = response.Error
+		resp.RegionError = response.RegionError
+
+	} else if req.CommitVersion == 0 {
+		rollbackResponse, err := server.KvBatchRollback(nil, &kvrpcpb.BatchRollbackRequest{
+			Context:      req.Context,
+			StartVersion: req.StartVersion,
+			Keys:         keys,
+		})
+		if err != nil {
+			if regionError, ok := err.(*raft_storage.RegionError); ok {
+				resp.RegionError = regionError.RequestErr
+				return resp, err
+			}
+		}
+
+		resp.Error = rollbackResponse.Error
+		resp.RegionError = rollbackResponse.RegionError
 	}
 
 	return resp, nil
