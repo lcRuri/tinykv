@@ -294,7 +294,77 @@ func (server *Server) KvCheckTxnStatus(_ context.Context, req *kvrpcpb.CheckTxnS
 
 func (server *Server) KvBatchRollback(_ context.Context, req *kvrpcpb.BatchRollbackRequest) (*kvrpcpb.BatchRollbackResponse, error) {
 	// Your Code Here (4C).
-	return nil, nil
+	resp := &kvrpcpb.BatchRollbackResponse{}
+	reader, err := server.storage.Reader(req.Context)
+	if err != nil {
+		if regionError, ok := err.(*raft_storage.RegionError); ok {
+			resp.RegionError = regionError.RequestErr
+			return resp, err
+		}
+	}
+	defer reader.Close()
+
+	txn := mvcc.NewMvccTxn(reader, req.StartVersion)
+
+	for _, key := range req.Keys {
+		//先判断这个key有没有存在的write
+		write, _, err := txn.CurrentWrite(key)
+		if err != nil {
+			if regionError, ok := err.(*raft_storage.RegionError); ok {
+				resp.RegionError = regionError.RequestErr
+				return resp, err
+			}
+		}
+
+		//存在并且已经是rollback 跳过处理下一个key
+		if write != nil && write.Kind == mvcc.WriteKindRollback {
+			continue
+		}
+
+		if write != nil && write.Kind == mvcc.WriteKindPut {
+			resp.Error = &kvrpcpb.KeyError{Abort: "true"}
+			return resp, nil
+		}
+
+		//判断是不是有锁
+		lock, err := txn.GetLock(key)
+		if err != nil {
+			if regionError, ok := err.(*raft_storage.RegionError); ok {
+				resp.RegionError = regionError.RequestErr
+				return resp, err
+			}
+		}
+
+		//有锁而且不是本次事务的锁
+		if lock != nil && lock.Ts != req.StartVersion {
+			txn.PutWrite(key, req.StartVersion, &mvcc.Write{
+				StartTS: req.StartVersion,
+				Kind:    mvcc.WriteKindRollback,
+			})
+			continue
+		}
+
+		//前置检查完毕 删除之前的值并且写入一个rollback的write
+		txn.PutWrite(key, req.StartVersion, &mvcc.Write{
+			StartTS: req.StartVersion,
+			Kind:    mvcc.WriteKindRollback,
+		})
+
+		txn.DeleteValue(key)
+		if lock != nil {
+			txn.DeleteLock(key)
+		}
+	}
+
+	err = server.storage.Write(req.Context, txn.Writes())
+	if err != nil {
+		if regionError, ok := err.(*raft_storage.RegionError); ok {
+			resp.RegionError = regionError.RequestErr
+			return resp, err
+		}
+	}
+
+	return resp, nil
 }
 
 func (server *Server) KvResolveLock(_ context.Context, req *kvrpcpb.ResolveLockRequest) (*kvrpcpb.ResolveLockResponse, error) {
