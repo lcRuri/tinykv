@@ -2,13 +2,11 @@ package server
 
 import (
 	"context"
-	"encoding/binary"
 	"github.com/pingcap-incubator/tinykv/kv/coprocessor"
 	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/kv/storage/raft_storage"
 	"github.com/pingcap-incubator/tinykv/kv/transaction/latches"
 	"github.com/pingcap-incubator/tinykv/kv/transaction/mvcc"
-	"github.com/pingcap-incubator/tinykv/kv/util/codec"
 	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
 	coppb "github.com/pingcap-incubator/tinykv/proto/pkg/coprocessor"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
@@ -285,7 +283,41 @@ func (server *Server) KvCommit(_ context.Context, req *kvrpcpb.CommitRequest) (*
 
 func (server *Server) KvScan(_ context.Context, req *kvrpcpb.ScanRequest) (*kvrpcpb.ScanResponse, error) {
 	// Your Code Here (4C).
-	return nil, nil
+	resp := &kvrpcpb.ScanResponse{}
+	reader, err := server.storage.Reader(req.Context)
+	if err != nil {
+		if regionError, ok := err.(*raft_storage.RegionError); ok {
+			resp.RegionError = regionError.RequestErr
+			return resp, err
+		}
+	}
+	defer reader.Close()
+
+	txn := mvcc.NewMvccTxn(reader, req.Version)
+	scanner := mvcc.NewScanner(req.StartKey, txn)
+	defer scanner.Close()
+	key, value, err := scanner.Next()
+	if err != nil {
+		return nil, err
+	}
+
+	var i uint32
+	for i = 0; i < req.Limit && key != nil; i++ {
+		if value != nil {
+			resp.Pairs = append(resp.Pairs, &kvrpcpb.KvPair{
+				Error: nil,
+				Key:   key,
+				Value: value,
+			})
+		}
+		key, value, err = scanner.Next()
+		if err != nil {
+			return nil, err
+		}
+
+	}
+
+	return resp, nil
 }
 
 func (server *Server) KvCheckTxnStatus(_ context.Context, req *kvrpcpb.CheckTxnStatusRequest) (*kvrpcpb.CheckTxnStatusResponse, error) {
@@ -530,12 +562,4 @@ func (server *Server) Coprocessor(_ context.Context, req *coppb.Request) (*coppb
 		return server.copHandler.HandleCopAnalyzeRequest(reader, req), nil
 	}
 	return nil, nil
-}
-
-func decodeTimestamp(key []byte) uint64 {
-	left, _, err := codec.DecodeBytes(key)
-	if err != nil {
-		panic(err)
-	}
-	return ^binary.BigEndian.Uint64(left)
 }

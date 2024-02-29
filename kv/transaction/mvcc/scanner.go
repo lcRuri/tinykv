@@ -57,18 +57,19 @@ func (scan *Scanner) Next() ([]byte, []byte, error) {
 		return userKey, nil, err
 	}
 
-	//key被删除了
-	if WriteKind(value[0]) == WriteKindDelete {
-		return nil, nil, err
-	}
 	var ts uint64
 	if value != nil {
 		ts = binary.BigEndian.Uint64(value[1:])
 	} else {
-		return nil, nil, err
+		return userKey, nil, err
 	}
 
-	val, err := scan.txn.Reader.GetCF(engine_util.CfDefault, EncodeKey(userKey, ts))
+	//key被删除了 值为空 不直接返回是因为为了走接下来的next
+	var val []byte
+	if WriteKind(value[0]) == WriteKindDelete {
+		val = nil
+	}
+	val, err = scan.txn.Reader.GetCF(engine_util.CfDefault, EncodeKey(userKey, ts))
 
 	for {
 		scan.iter.Next()
