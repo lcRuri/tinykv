@@ -10,15 +10,21 @@ import (
 // for multiple TinyKV commands. For example, consider two commit commands, these write to multiple keys/CFs so if they race,
 // then it is possible for inconsistent data to be written. By latching the keys each command might write, we ensure that the
 // two commands will not race to write the same keys.
-//
+// Latching为TinyKV的命令提供了原子性。对于批量的TinyKV的命令，这个原子性不应该和SQL事务提供的的原子性混淆。
+// 比如，考虑两个提交命令，它们更改多个keys/CFs如果它们竞争的话，那么对于更改的数据就有可能不一致。
+// 通过锁定每个命令可能写入的键，我们可以确保两个命令不会竞争写相同的键
 // A latch is a per-key lock. There is only one latch per user key, not one per CF or one for each encoded key. Latches are
 // only needed for writing. Only one thread can hold a latch at a time and all keys that a command might write must be locked
 // at once.
-//
+// A latch是一个 a per-key lock.每个key只有一个latch，不是每个CF一个，也不是每个编码密钥一个。Latches只有写入的时候需要，
+// 一次只有一个线程可以持有锁存器，并且命令可能写入的所有键都必须锁定
 // Latching is implemented using a single map which maps keys to a Go WaitGroup. Access to this map is guarded by a mutex
 // to ensure that latching is atomic and consistent. Since the mutex is a global lock, it would cause intolerable contention
 // in a real system.
+// Latching是通过一个map实现的，它将键映射到Go WaitGroup。对这个映射的访问是由互斥锁保护的
+// 确保锁存是原子的和一致的。由于互斥锁是一个全局锁，它将导致无法忍受的争用
 
+// 写入的时候通过WaitForLatches一直尝试获取锁，它会一直获取锁直到ReleaseLatches释放掉所有锁wg才会出来
 type Latches struct {
 	// Before modifying any property of a key, the thread must have the latch for that key. `Latches` maps each latched
 	// key to a WaitGroup. Threads who find a key locked should wait on that WaitGroup.
